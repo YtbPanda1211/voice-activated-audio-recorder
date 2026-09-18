@@ -6,6 +6,7 @@
   <title>Ghi âm tự động theo giọng nói</title>
   <style>
     :root {
+      color-scheme: light;
       --bg: #f4f7fb;
       --panel: rgba(255, 255, 255, 0.94);
       --ink: #14213d;
@@ -97,7 +98,94 @@
 
     .privacy-pill svg { width: 16px; height: 16px; }
 
-    .panel {
+    .hero-actions {
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 10px;
+    }
+
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--ink);
+      background: var(--panel);
+      box-shadow: 0 6px 15px rgba(40, 52, 90, 0.06);
+      font-size: 0.82rem;
+      font-weight: 760;
+      transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
+    }
+
+    .theme-toggle:hover { transform: translateY(-1px); background: var(--primary-soft); }
+    .theme-toggle svg { width: 17px; height: 17px; }
+    .theme-toggle .sun-icon { display: none; }
+    .theme-toggle .moon-icon { display: block; }
+
+    html[data-theme="dark"] .theme-toggle .sun-icon { display: block; }
+    html[data-theme="dark"] .theme-toggle .moon-icon { display: none; }
+
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #0d1321;
+      --panel: rgba(20, 28, 45, 0.95);
+      --ink: #f1f5ff;
+      --muted: #aab3c4;
+      --line: #2d374b;
+      --primary: #8b8dfb;
+      --primary-dark: #a5a6ff;
+      --primary-soft: #2a2d5b;
+      --green: #67d6a1;
+      --green-soft: #173c2e;
+      --orange: #f2b65f;
+      --orange-soft: #3c2d18;
+      --red: #fa8198;
+      --red-soft: #3e202c;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+
+    html[data-theme="dark"] .privacy-pill {
+      border-color: #2d5b4b;
+      color: #9be6c3;
+      background: rgba(18, 61, 49, 0.82);
+    }
+
+    html[data-theme="dark"] .panel { border-color: rgba(255, 255, 255, 0.08); }
+    html[data-theme="dark"] .recording-stage {
+      border-color: var(--line);
+      background: linear-gradient(145deg, #151d30, #18203a);
+    }
+    html[data-theme="dark"] .mic-orb { border-color: #3b3f78; }
+    html[data-theme="dark"] .mic-orb.is-paused { border-color: #414958; }
+    html[data-theme="dark"] .level-track { background: #30394c; }
+    html[data-theme="dark"] .waveform-wrap { border-color: var(--line); background: #111929; }
+    html[data-theme="dark"] .silence-box { border-color: #5b4523; color: #ffd58d; background: #2c2416; }
+    html[data-theme="dark"] .progress-track { background: #49371f; }
+    html[data-theme="dark"] .settings { border-color: var(--line); background: #111929; }
+    html[data-theme="dark"] .capture-option { border-color: var(--line); background: #151e30; }
+    html[data-theme="dark"] .switch-track { background: #3d475b; }
+    html[data-theme="dark"] .button-secondary { border-color: #3b465a; color: #e0e6f2; background: #1a2232; }
+    html[data-theme="dark"] .button-secondary:not(:disabled):hover { background: #232d40; }
+    html[data-theme="dark"] .button-quiet { color: #e0e6f2; background: #252e40; }
+    html[data-theme="dark"] .button-danger { border-color: #6a3442; color: #ff9aae; background: #2d1b25; }
+    html[data-theme="dark"] .button-danger:not(:disabled):hover { background: #41202d; }
+    html[data-theme="dark"] .tip { border-color: var(--line); background: rgba(20, 28, 45, 0.66); }
+    html[data-theme="dark"] .status-badge { background: #202a3b; }
+    html[data-theme="dark"] .status-badge.recording { color: #ff9aae; background: var(--red-soft); }
+    html[data-theme="dark"] .status-badge.waiting { color: #b9baff; background: var(--primary-soft); }
+    html[data-theme="dark"] .status-badge.countdown { color: #ffd18a; background: var(--orange-soft); }
+    html[data-theme="dark"] .status-badge.paused { color: #c6cedd; background: #293241; }
+    html[data-theme="dark"] .status-badge.done { color: #91e9bd; background: var(--green-soft); }
+    html[data-theme="dark"] .status-badge.error { color: #ff9aae; background: var(--red-soft); }
+    html[data-theme="dark"] .footer-note { color: #8994a8; }
+
+    .panel { 
       border: 1px solid rgba(255, 255, 255, 0.9);
       border-radius: 28px;
       background: var(--panel);
@@ -337,6 +425,64 @@
     input[type="range"] { width: 100%; accent-color: var(--primary); }
     .threshold-value { min-width: 66px; color: var(--primary); font-size: 0.86rem; font-weight: 800; text-align: right; }
 
+    .capture-option {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin-top: 16px;
+      padding: 15px 16px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+    }
+
+    .capture-option label { margin-bottom: 0; }
+    .capture-option small { max-width: 690px; margin-top: 5px; }
+    .switch {
+      position: relative;
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      margin: 0;
+      cursor: pointer;
+    }
+
+    .switch input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+    }
+
+    .switch-track {
+      position: relative;
+      display: block;
+      width: 52px;
+      height: 30px;
+      border-radius: 99px;
+      background: #d7dce6;
+      transition: background 160ms ease, box-shadow 160ms ease;
+    }
+
+    .switch-track::after {
+      content: "";
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 2px 6px rgba(22, 33, 61, 0.2);
+      transition: transform 160ms ease;
+    }
+
+    .switch input:checked + .switch-track { background: var(--primary); box-shadow: 0 0 0 4px rgba(91, 92, 226, 0.12); }
+    .switch input:checked + .switch-track::after { transform: translateX(22px); }
+    .switch input:focus-visible + .switch-track { outline: 3px solid rgba(91, 92, 226, 0.28); outline-offset: 3px; }
+    .switch input:disabled + .switch-track { cursor: not-allowed; opacity: 0.55; }
+
     .controls {
       display: flex;
       flex-wrap: wrap;
@@ -435,7 +581,8 @@
     @media (max-width: 680px) {
       .page { width: min(100% - 20px, 920px); padding-top: 24px; }
       .hero { display: block; }
-      .privacy-pill { margin-top: 16px; }
+      .hero-actions { align-items: flex-start; margin-top: 18px; }
+      .privacy-pill { margin-top: 0; }
       .card-heading { align-items: flex-start; flex-direction: column; }
       .settings { grid-template-columns: 1fr; gap: 12px; }
       .tips { grid-template-columns: 1fr; }
@@ -452,12 +599,24 @@
         <h1>Ghi âm theo tiếng nói, tự dừng khi im lặng.</h1>
         <p class="hero-copy">Nhấn bắt đầu, nói bình thường và bản ghi sẽ tự tạm dừng sau khoảng thời gian im lặng bạn chọn. Khi bạn nói lại, hệ thống tiếp tục ghi trên cùng một bản ghi.</p>
       </div>
-      <div class="privacy-pill" title="Âm thanh chỉ được xử lý trong trình duyệt">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M12 3 5 6v5c0 4.5 2.8 8.3 7 10 4.2-1.7 7-5.5 7-10V6l-7-3Z" />
-          <path d="m9.5 12 1.7 1.7 3.5-3.7" />
-        </svg>
-        Xử lý ngay trên máy
+      <div class="hero-actions">
+        <div class="privacy-pill" title="Âm thanh chỉ được xử lý trong trình duyệt">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M12 3 5 6v5c0 4.5 2.8 8.3 7 10 4.2-1.7 7-5.5 7-10V6l-7-3Z" />
+            <path d="m9.5 12 1.7 1.7 3.5-3.7" />
+          </svg>
+          Xử lý ngay trên máy
+        </div>
+        <button id="themeToggle" class="theme-toggle" type="button" aria-pressed="false" title="Chuyển sang giao diện tối">
+          <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z"></path>
+          </svg>
+          <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"></circle>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"></path>
+          </svg>
+          <span id="themeToggleLabel">Chế độ tối</span>
+        </button>
       </div>
     </header>
 
@@ -520,6 +679,17 @@
         </div>
       </div>
 
+      <div class="capture-option">
+        <div>
+          <label for="systemAudioToggle">Ghi âm âm thanh trình duyệt / thiết bị</label>
+          <small id="systemAudioHelp">Bật để ghi cùng lúc âm thanh từ tab, cửa sổ hoặc màn hình và tiếng nói từ micro. Khi được hỏi, hãy chọn nguồn chia sẻ và bật <strong>Chia sẻ âm thanh</strong>.</small>
+        </div>
+        <label class="switch" title="Bật hoặc tắt ghi âm âm thanh trình duyệt/thiết bị">
+          <input id="systemAudioToggle" type="checkbox" aria-describedby="systemAudioHelp" />
+          <span class="switch-track" aria-hidden="true"></span>
+        </label>
+      </div>
+
       <div class="controls">
         <button id="startBtn" class="button button-primary" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -572,8 +742,8 @@
     <section class="tips" aria-label="Hướng dẫn sử dụng">
       <div class="tip">
         <span class="tip-number">1</span>
-        <strong>Cấp quyền micro</strong>
-        <span>Cho phép trình duyệt truy cập micro khi được hỏi.</span>
+        <strong>Cấp quyền micro &amp; audio</strong>
+        <span>Cho phép micro; nếu bật âm thanh thiết bị, chọn nguồn chia sẻ và bật “Chia sẻ âm thanh”.</span>
       </div>
       <div class="tip">
         <span class="tip-number">2</span>
@@ -587,7 +757,7 @@
       </div>
     </section>
 
-    <p class="footer-note"> Credit: Trang web này được tạo bởi <strong>SEONG</strong> hoặc <strong>Rice Field</strong>. Trang web được tạo với ý tưởng chơi chơi ngẫu hứng.</p>
+    <p class="footer-note">Mẹo: nên chạy trang bằng <strong>localhost</strong> hoặc <strong>HTTPS</strong> để quyền micro hoạt động ổn định. Âm thanh không được gửi lên máy chủ.</p>
   </main>
 
   <script>
@@ -595,6 +765,7 @@
       "use strict";
 
       const DEFAULT_SILENCE_LIMIT_MS = 5000;
+      const THEME_STORAGE_KEY = "voice-recorder-theme";
       const DEFAULT_STATUS_DETAIL = "Nhấn “Bắt đầu nghe” để cấp quyền micro và chờ tiếng nói.";
 
       const els = {
@@ -622,13 +793,19 @@
         resultCard: document.getElementById("resultCard"),
         resultMeta: document.getElementById("resultMeta"),
         audioPreview: document.getElementById("audioPreview"),
-        downloadBtn: document.getElementById("downloadBtn")
+        downloadBtn: document.getElementById("downloadBtn"),
+        systemAudioToggle: document.getElementById("systemAudioToggle"),
+        themeToggle: document.getElementById("themeToggle"),
+        themeToggleLabel: document.getElementById("themeToggleLabel")
       };
 
       let stream = null;
+      let systemStream = null;
       let audioContext = null;
       let analyser = null;
       let microphoneSource = null;
+      let systemSource = null;
+      let recordingDestination = null;
       let mediaRecorder = null;
       let animationId = null;
       let audioData = null;
@@ -639,6 +816,8 @@
       let activeDurationMs = 0;
       let chunks = [];
       let isMonitoring = false;
+      let isStartingSession = false;
+      let systemAudioRequestInProgress = false;
       let discardOnStop = false;
       let recordingBlob = null;
       let recordingUrl = "";
@@ -712,10 +891,40 @@
         els.notice.className = `notice ${type}`.trim();
       }
 
+      function applyTheme(theme) {
+        const isDark = theme === "dark";
+        document.documentElement.dataset.theme = isDark ? "dark" : "light";
+        els.themeToggle.setAttribute("aria-pressed", String(isDark));
+        els.themeToggleLabel.textContent = isDark ? "Chế độ sáng" : "Chế độ tối";
+        els.themeToggle.title = isDark ? "Chuyển sang giao diện sáng" : "Chuyển sang giao diện tối";
+      }
+
+      function getInitialTheme() {
+        try {
+          const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+          if (savedTheme === "dark" || savedTheme === "light") return savedTheme;
+        } catch (error) {
+          // Một số chế độ riêng tư có thể chặn localStorage; dùng giao diện mặc định khi đó.
+        }
+
+        return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+
+      function toggleTheme() {
+        const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+        applyTheme(nextTheme);
+        try {
+          localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+        } catch (error) {
+          // Giao diện vẫn đổi được dù không thể lưu lựa chọn.
+        }
+      }
+
       function updateButtons() {
-        els.startBtn.disabled = isMonitoring;
+        els.startBtn.disabled = isMonitoring || isStartingSession;
         els.stopBtn.disabled = !isMonitoring;
         els.deleteBtn.disabled = !isMonitoring && !recordingBlob;
+        els.systemAudioToggle.disabled = isStartingSession || systemAudioRequestInProgress;
       }
 
       function updateSilenceProgress(progress = 0, visible = false) {
@@ -768,32 +977,194 @@
         updateButtons();
       }
 
+      function stopStreamTracks(mediaStream) {
+        if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
+      }
+
+      function systemAudioErrorMessage(error) {
+        if (error?.code === "NO_SYSTEM_AUDIO") {
+          return "Nguồn chia sẻ chưa có âm thanh. Hãy thử lại và bật tùy chọn “Chia sẻ âm thanh” trong hộp thoại của trình duyệt.";
+        }
+        if (error?.name === "NotAllowedError") {
+          return "Bạn đã hủy quyền chia sẻ âm thanh trình duyệt/thiết bị. Hãy tắt công tắc nếu chỉ muốn ghi bằng micro, hoặc bật lại để thử chia sẻ lần nữa.";
+        }
+        if (error?.name === "NotFoundError") {
+          return "Không tìm thấy nguồn âm thanh trình duyệt/thiết bị để chia sẻ.";
+        }
+        return `Không thể ghi âm âm thanh trình duyệt/thiết bị: ${error?.message || "lỗi không xác định"}`;
+      }
+
+      async function requestSystemAudioStream() {
+        if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== "function") {
+          const error = new Error("Trình duyệt không hỗ trợ getDisplayMedia.");
+          error.code = "SYSTEM_AUDIO_UNSUPPORTED";
+          throw error;
+        }
+
+        const capturedStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: true
+        });
+
+        if (!capturedStream.getAudioTracks().length) {
+          stopStreamTracks(capturedStream);
+          const error = new Error("Nguồn chia sẻ không có audio track.");
+          error.code = "NO_SYSTEM_AUDIO";
+          throw error;
+        }
+
+        return capturedStream;
+      }
+
+      function attachSystemStreamHandlers(capturedStream) {
+        capturedStream.getTracks().forEach((track) => {
+          track.addEventListener("ended", handleSystemStreamEnded);
+        });
+      }
+
+      function handleSystemStreamEnded() {
+        if (!systemStream) return;
+        const hasLiveAudio = systemStream.getAudioTracks().some((track) => track.readyState === "live");
+        if (hasLiveAudio) return;
+
+        if (systemSource && recordingDestination) {
+          try {
+            systemSource.disconnect(recordingDestination);
+          } catch (error) {
+            // Node có thể đã tự ngắt khi track chia sẻ kết thúc.
+          }
+        }
+        const endedSystemStream = systemStream;
+        systemSource = null;
+        systemStream = null;
+        stopStreamTracks(endedSystemStream);
+        els.systemAudioToggle.checked = false;
+        if (isMonitoring) {
+          setNotice("Đã dừng chia sẻ âm thanh trình duyệt/thiết bị. Bản ghi vẫn tiếp tục với micro.");
+        }
+      }
+
+      function connectSystemAudioStream(capturedStream) {
+        if (!audioContext || !recordingDestination) {
+          stopStreamTracks(capturedStream);
+          throw new Error("Bộ trộn âm thanh chưa sẵn sàng.");
+        }
+
+        if (!capturedStream.getAudioTracks().some((track) => track.readyState === "live")) {
+          stopStreamTracks(capturedStream);
+          const error = new Error("Nguồn chia sẻ không còn audio track hoạt động.");
+          error.code = "NO_SYSTEM_AUDIO";
+          throw error;
+        }
+
+        try {
+          const source = audioContext.createMediaStreamSource(capturedStream);
+          source.connect(recordingDestination);
+          systemStream = capturedStream;
+          systemSource = source;
+          attachSystemStreamHandlers(capturedStream);
+        } catch (error) {
+          stopStreamTracks(capturedStream);
+          throw error;
+        }
+      }
+
+      function disableSystemAudio(showNotice = true) {
+        if (systemSource && recordingDestination) {
+          try {
+            systemSource.disconnect(recordingDestination);
+          } catch (error) {
+            // Đã ngắt kết nối trước đó.
+          }
+        }
+        const currentSystemStream = systemStream;
+        systemSource = null;
+        systemStream = null;
+        stopStreamTracks(currentSystemStream);
+        if (showNotice && isMonitoring) {
+          setNotice("Đã tắt ghi âm âm thanh trình duyệt/thiết bị. Từ giờ chỉ ghi âm micro.");
+        }
+      }
+
+      async function enableSystemAudio() {
+        if (!isMonitoring || systemStream || systemAudioRequestInProgress) return;
+
+        systemAudioRequestInProgress = true;
+        updateButtons();
+        setNotice("Chọn tab, cửa sổ hoặc màn hình trong hộp thoại, sau đó bật “Chia sẻ âm thanh”.");
+
+        try {
+          const capturedStream = await requestSystemAudioStream();
+          if (!isMonitoring) {
+            stopStreamTracks(capturedStream);
+            return;
+          }
+          connectSystemAudioStream(capturedStream);
+          setNotice("Đang ghi cả âm thanh trình duyệt/thiết bị và tiếng nói từ micro.", "success");
+        } catch (error) {
+          els.systemAudioToggle.checked = false;
+          setNotice(systemAudioErrorMessage(error), "error");
+        } finally {
+          systemAudioRequestInProgress = false;
+          updateButtons();
+        }
+      }
+
       function cleanupAudioSession() {
         if (animationId !== null) {
           cancelAnimationFrame(animationId);
           animationId = null;
         }
 
-        if (stream) {
-          stream.getTracks().forEach((track) => track.stop());
+        const currentAudioContext = audioContext;
+        const currentMicrophoneSource = microphoneSource;
+        const currentSystemSource = systemSource;
+        const currentRecordingDestination = recordingDestination;
+        const currentMicrophoneStream = stream;
+        const currentSystemStream = systemStream;
+        const currentRecordingStream = recordingDestination?.stream;
+
+        if (currentMicrophoneSource) {
+          try {
+            currentMicrophoneSource.disconnect();
+          } catch (error) {
+            // Source có thể đã được ngắt khi trình duyệt dừng capture.
+          }
+        }
+        if (currentSystemSource && currentRecordingDestination) {
+          try {
+            currentSystemSource.disconnect(currentRecordingDestination);
+          } catch (error) {
+            // Source có thể đã được ngắt khi trình duyệt dừng capture.
+          }
         }
 
-        if (audioContext && audioContext.state !== "closed") {
-          audioContext.close().catch(() => {});
-        }
-
+        // Xóa các tham chiếu trước khi stop track để tránh callback ended gọi lại cleanup.
         stream = null;
+        systemStream = null;
         audioContext = null;
         analyser = null;
         microphoneSource = null;
+        systemSource = null;
+        recordingDestination = null;
         mediaRecorder = null;
         audioData = null;
         isMonitoring = false;
+        isStartingSession = false;
+        systemAudioRequestInProgress = false;
         speechState = false;
         silenceStartedAt = null;
         segmentStartedAt = null;
         activeDurationMs = 0;
         smoothedRms = 0;
+        stopStreamTracks(currentMicrophoneStream);
+        stopStreamTracks(currentSystemStream);
+        stopStreamTracks(currentRecordingStream);
+
+        if (currentAudioContext && currentAudioContext.state !== "closed") {
+          currentAudioContext.close().catch(() => {});
+        }
+
         els.levelBar.style.width = "0%";
         updateSilenceProgress(0, false);
         updateTimer();
@@ -959,7 +1330,7 @@
       }
 
       async function startSession() {
-        if (isMonitoring) return;
+        if (isMonitoring || isStartingSession) return;
 
         if (recordingBlob) {
           const replace = window.confirm("Bản ghi hiện tại sẽ bị thay thế. Bạn có muốn bắt đầu bản ghi mới không?");
@@ -979,7 +1350,19 @@
           return;
         }
 
+        isStartingSession = true;
+        updateButtons();
+        let systemAudioPromptActive = false;
+
         try {
+          // Gọi getDisplayMedia trước getUserMedia để hộp thoại chia sẻ vẫn được trình duyệt cho phép.
+          if (els.systemAudioToggle.checked) {
+            systemAudioPromptActive = true;
+            setNotice("Chọn tab, cửa sổ hoặc màn hình trong hộp thoại, sau đó bật “Chia sẻ âm thanh”.");
+            systemStream = await requestSystemAudioStream();
+            systemAudioPromptActive = false;
+          }
+
           stream = await navigator.mediaDevices.getUserMedia({
             audio: {
               echoCancellation: true,
@@ -997,14 +1380,25 @@
           analyser = audioContext.createAnalyser();
           analyser.fftSize = 2048;
           analyser.smoothingTimeConstant = 0.78;
+          recordingDestination = audioContext.createMediaStreamDestination();
           microphoneSource = audioContext.createMediaStreamSource(stream);
+          // Chỉ dùng tín hiệu micro để phát hiện tiếng nói, tránh âm thanh trình duyệt kích hoạt ghi.
           microphoneSource.connect(analyser);
+          microphoneSource.connect(recordingDestination);
           audioData = new Uint8Array(analyser.fftSize);
 
+          if (systemStream) {
+            connectSystemAudioStream(systemStream);
+          }
+
           const mimeType = supportedMimeType();
-          mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+          const mixedAudioStream = recordingDestination.stream;
+          mediaRecorder = mimeType
+            ? new MediaRecorder(mixedAudioStream, { mimeType })
+            : new MediaRecorder(mixedAudioStream);
           chunks = [];
           isMonitoring = true;
+          isStartingSession = false;
           discardOnStop = false;
           activeDurationMs = 0;
           segmentStartedAt = null;
@@ -1020,18 +1414,26 @@
             setNotice(`Lỗi ghi âm: ${event.error?.message || "không xác định"}`, "error");
           });
 
-          setStatus("waiting", "Đang chờ tiếng nói", "Micro đã sẵn sàng. Hãy nói để bắt đầu ghi âm.");
-          setNotice("Đang nghe micro. Bản ghi chỉ bắt đầu khi phát hiện tiếng nói.");
+          const sourceText = systemStream
+            ? "Micro và âm thanh trình duyệt/thiết bị đã sẵn sàng. Hãy nói để bắt đầu ghi âm."
+            : "Micro đã sẵn sàng. Hãy nói để bắt đầu ghi âm.";
+          setStatus("waiting", "Đang chờ tiếng nói", sourceText);
+          setNotice(systemStream
+            ? "Đang nghe micro và âm thanh trình duyệt/thiết bị. Bản ghi chỉ bắt đầu khi phát hiện tiếng nói."
+            : "Đang nghe micro. Bản ghi chỉ bắt đầu khi phát hiện tiếng nói.");
           updateButtons();
           animationId = requestAnimationFrame(drawWaveform);
         } catch (error) {
+          if (systemAudioPromptActive) els.systemAudioToggle.checked = false;
           cleanupAudioSession();
-          const message = error?.name === "NotAllowedError"
-            ? "Bạn chưa cấp quyền micro. Hãy cho phép micro trong thanh địa chỉ rồi thử lại."
-            : error?.name === "NotFoundError"
-              ? "Không tìm thấy micro. Hãy kết nối micro rồi thử lại."
-              : `Không thể truy cập micro: ${error?.message || "lỗi không xác định"}`;
-          setStatus("error", "Không bật được micro", message);
+          const message = systemAudioPromptActive
+            ? systemAudioErrorMessage(error)
+            : error?.name === "NotAllowedError"
+              ? "Bạn chưa cấp quyền micro. Hãy cho phép micro trong thanh địa chỉ rồi thử lại."
+              : error?.name === "NotFoundError"
+                ? "Không tìm thấy micro. Hãy kết nối micro rồi thử lại."
+                : `Không thể khởi động ghi âm: ${error?.message || "lỗi không xác định"}`;
+          setStatus("error", "Không bật được ghi âm", message);
           setNotice(message, "error");
         }
       }
@@ -1105,8 +1507,21 @@
           updateSilenceProgress(progress, true);
         }
       });
+      els.systemAudioToggle.addEventListener("change", () => {
+        if (!isMonitoring) {
+          setNotice(els.systemAudioToggle.checked
+            ? "Âm thanh trình duyệt/thiết bị sẽ được ghi cùng micro ở phiên tiếp theo."
+            : "Đã tắt ghi âm âm thanh trình duyệt/thiết bị; chỉ ghi âm micro.");
+          return;
+        }
+
+        if (els.systemAudioToggle.checked) enableSystemAudio();
+        else disableSystemAudio();
+      });
+      els.themeToggle.addEventListener("click", toggleTheme);
       window.addEventListener("resize", initializeCanvas);
 
+      applyTheme(getInitialTheme());
       initializeCanvas();
       updateSilenceLabels();
       updateButtons();

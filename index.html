@@ -690,6 +690,17 @@
         </label>
       </div>
 
+      <div class="capture-option">
+        <div>
+          <label for="systemOnlyToggle">Chỉ ghi âm trình duyệt / thiết bị</label>
+          <small id="systemOnlyHelp">Bật để loại bỏ âm thanh từ micro khỏi file. Micro vẫn có thể được dùng để phát hiện tiếng nói và điều khiển tự tạm dừng; âm thanh micro không được ghi vào bản ghi.</small>
+        </div>
+        <label class="switch" title="Chỉ ghi âm thanh trình duyệt/thiết bị, không ghi micro">
+          <input id="systemOnlyToggle" type="checkbox" aria-describedby="systemOnlyHelp" />
+          <span class="switch-track" aria-hidden="true"></span>
+        </label>
+      </div>
+
       <div class="controls">
         <button id="startBtn" class="button button-primary" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -795,6 +806,7 @@
         audioPreview: document.getElementById("audioPreview"),
         downloadBtn: document.getElementById("downloadBtn"),
         systemAudioToggle: document.getElementById("systemAudioToggle"),
+        systemOnlyToggle: document.getElementById("systemOnlyToggle"),
         themeToggle: document.getElementById("themeToggle"),
         themeToggleLabel: document.getElementById("themeToggleLabel")
       };
@@ -804,6 +816,7 @@
       let audioContext = null;
       let analyser = null;
       let microphoneSource = null;
+      let microphoneRecordingConnected = false;
       let systemSource = null;
       let recordingDestination = null;
       let mediaRecorder = null;
@@ -818,6 +831,7 @@
       let isMonitoring = false;
       let isStartingSession = false;
       let systemAudioRequestInProgress = false;
+      let systemAudioChoiceBeforeOnly = false;
       let discardOnStop = false;
       let recordingBlob = null;
       let recordingUrl = "";
@@ -924,7 +938,8 @@
         els.startBtn.disabled = isMonitoring || isStartingSession;
         els.stopBtn.disabled = !isMonitoring;
         els.deleteBtn.disabled = !isMonitoring && !recordingBlob;
-        els.systemAudioToggle.disabled = isStartingSession || systemAudioRequestInProgress;
+        els.systemAudioToggle.disabled = isStartingSession || systemAudioRequestInProgress || els.systemOnlyToggle.checked;
+        els.systemOnlyToggle.disabled = isStartingSession || systemAudioRequestInProgress;
       }
 
       function updateSilenceProgress(progress = 0, visible = false) {
@@ -981,6 +996,22 @@
         if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
       }
 
+      function connectMicrophoneToRecording() {
+        if (!microphoneSource || !recordingDestination || microphoneRecordingConnected) return;
+        microphoneSource.connect(recordingDestination);
+        microphoneRecordingConnected = true;
+      }
+
+      function disconnectMicrophoneFromRecording() {
+        if (!microphoneSource || !recordingDestination || !microphoneRecordingConnected) return;
+        try {
+          microphoneSource.disconnect(recordingDestination);
+        } catch (error) {
+          // Micro đã được ngắt khỏi bộ trộn.
+        }
+        microphoneRecordingConnected = false;
+      }
+
       function systemAudioErrorMessage(error) {
         if (error?.code === "NO_SYSTEM_AUDIO") {
           return "Nguồn chia sẻ chưa có âm thanh. Hãy thử lại và bật tùy chọn “Chia sẻ âm thanh” trong hộp thoại của trình duyệt.";
@@ -1035,12 +1066,20 @@
           }
         }
         const endedSystemStream = systemStream;
+        const wasSystemOnly = els.systemOnlyToggle.checked;
         systemSource = null;
         systemStream = null;
         stopStreamTracks(endedSystemStream);
         els.systemAudioToggle.checked = false;
+        if (wasSystemOnly) {
+          els.systemOnlyToggle.checked = false;
+          connectMicrophoneToRecording();
+        }
+        updateButtons();
         if (isMonitoring) {
-          setNotice("Đã dừng chia sẻ âm thanh trình duyệt/thiết bị. Bản ghi vẫn tiếp tục với micro.");
+          setNotice(wasSystemOnly
+            ? "Đã dừng chia sẻ âm thanh trình duyệt/thiết bị. Chế độ chỉ thiết bị đã tắt, bản ghi tiếp tục với micro."
+            : "Đã dừng chia sẻ âm thanh trình duyệt/thiết bị. Bản ghi vẫn tiếp tục với micro.");
         }
       }
 
@@ -1089,6 +1128,7 @@
       async function enableSystemAudio() {
         if (!isMonitoring || systemStream || systemAudioRequestInProgress) return;
 
+        const requestedSystemOnly = els.systemOnlyToggle.checked;
         systemAudioRequestInProgress = true;
         updateButtons();
         setNotice("Chọn tab, cửa sổ hoặc màn hình trong hộp thoại, sau đó bật “Chia sẻ âm thanh”.");
@@ -1100,14 +1140,68 @@
             return;
           }
           connectSystemAudioStream(capturedStream);
-          setNotice("Đang ghi cả âm thanh trình duyệt/thiết bị và tiếng nói từ micro.", "success");
+          setNotice(requestedSystemOnly
+            ? "Đang chỉ ghi âm thanh trình duyệt/thiết bị; âm thanh micro không được đưa vào bản ghi."
+            : "Đang ghi cả âm thanh trình duyệt/thiết bị và tiếng nói từ micro.", "success");
         } catch (error) {
           els.systemAudioToggle.checked = false;
+          if (requestedSystemOnly) {
+            els.systemOnlyToggle.checked = false;
+            connectMicrophoneToRecording();
+          }
           setNotice(systemAudioErrorMessage(error), "error");
         } finally {
           systemAudioRequestInProgress = false;
           updateButtons();
         }
+      }
+
+      async function handleSystemOnlyToggle() {
+        const enabled = els.systemOnlyToggle.checked;
+
+        if (!isMonitoring) {
+          if (enabled) {
+            systemAudioChoiceBeforeOnly = els.systemAudioToggle.checked;
+            els.systemAudioToggle.checked = true;
+            setNotice("Phiên tiếp theo sẽ chỉ ghi âm thanh trình duyệt/thiết bị; micro không được đưa vào bản ghi.");
+          } else {
+            els.systemAudioToggle.checked = systemAudioChoiceBeforeOnly;
+            setNotice(systemAudioChoiceBeforeOnly
+              ? "Đã tắt chế độ chỉ thiết bị. Phiên tiếp theo sẽ ghi cả âm thanh thiết bị và micro."
+              : "Đã tắt chế độ chỉ thiết bị. Phiên tiếp theo sẽ chỉ ghi micro.");
+          }
+          updateButtons();
+          return;
+        }
+
+        if (enabled) {
+          systemAudioChoiceBeforeOnly = els.systemAudioToggle.checked;
+          els.systemAudioToggle.checked = true;
+          updateButtons();
+          if (!systemStream) await enableSystemAudio();
+          if (els.systemOnlyToggle.checked && systemStream) {
+            disconnectMicrophoneFromRecording();
+            setNotice("Đang chỉ ghi âm thanh trình duyệt/thiết bị; âm thanh micro không được đưa vào bản ghi.", "success");
+          }
+          return;
+        }
+
+        const restoreSystemAudio = systemAudioChoiceBeforeOnly;
+        els.systemOnlyToggle.checked = false;
+        if (restoreSystemAudio) {
+          els.systemAudioToggle.checked = true;
+          if (!systemStream) await enableSystemAudio();
+          connectMicrophoneToRecording();
+          setNotice(systemStream
+            ? "Đã tắt chế độ chỉ thiết bị. Đang ghi cả âm thanh trình duyệt/thiết bị và micro."
+            : "Không có âm thanh thiết bị; đang tiếp tục chỉ ghi micro.", "success");
+        } else {
+          els.systemAudioToggle.checked = false;
+          connectMicrophoneToRecording();
+          if (systemStream) disableSystemAudio(false);
+          setNotice("Đã tắt chế độ chỉ thiết bị. Từ giờ chỉ ghi âm thanh micro.", "success");
+        }
+        updateButtons();
       }
 
       function cleanupAudioSession() {
@@ -1145,6 +1239,7 @@
         audioContext = null;
         analyser = null;
         microphoneSource = null;
+        microphoneRecordingConnected = false;
         systemSource = null;
         recordingDestination = null;
         mediaRecorder = null;
@@ -1213,8 +1308,12 @@
         try {
           mediaRecorder.start(250);
           segmentStartedAt = performance.now();
-          setStatus("recording", "Đang ghi âm", `Đang thu tiếng nói. Khi im lặng đủ ${formatSilenceLabel(silenceLimitMs)}, bản ghi sẽ tự tạm dừng.`);
-          setNotice("Đang ghi trên cùng một bản ghi. Bạn có thể ngừng nói bất cứ lúc nào.");
+          setStatus("recording", "Đang ghi âm", els.systemOnlyToggle.checked
+            ? `Đang chỉ ghi âm thanh trình duyệt/thiết bị. Khi im lặng đủ ${formatSilenceLabel(silenceLimitMs)}, bản ghi sẽ tự tạm dừng.`
+            : `Đang thu tiếng nói. Khi im lặng đủ ${formatSilenceLabel(silenceLimitMs)}, bản ghi sẽ tự tạm dừng.`);
+          setNotice(els.systemOnlyToggle.checked
+            ? "Đang chỉ ghi âm thanh trình duyệt/thiết bị; âm thanh micro không được đưa vào bản ghi."
+            : "Đang ghi trên cùng một bản ghi. Bạn có thể ngừng nói bất cứ lúc nào.");
         } catch (error) {
           setNotice(`Không thể bắt đầu ghi âm: ${error.message || "lỗi không xác định"}`, "error");
         }
@@ -1228,8 +1327,12 @@
           segmentStartedAt = performance.now();
           silenceStartedAt = null;
           updateSilenceProgress(0, false);
-          setStatus("recording", "Đang ghi âm", "Đã phát hiện tiếng nói lại — tiếp tục trên bản ghi hiện tại.");
-          setNotice("Đã tiếp tục ghi âm trên bản ghi hiện tại.", "success");
+          setStatus("recording", "Đang ghi âm", els.systemOnlyToggle.checked
+            ? "Đã phát hiện tiếng nói lại — tiếp tục ghi âm thanh trình duyệt/thiết bị."
+            : "Đã phát hiện tiếng nói lại — tiếp tục trên bản ghi hiện tại.");
+          setNotice(els.systemOnlyToggle.checked
+            ? "Đã tiếp tục ghi âm thanh trình duyệt/thiết bị; âm thanh micro vẫn không được ghi."
+            : "Đã tiếp tục ghi âm trên bản ghi hiện tại.", "success");
         } catch (error) {
           setNotice(`Không thể tiếp tục ghi âm: ${error.message || "lỗi không xác định"}`, "error");
         }
@@ -1353,10 +1456,12 @@
         isStartingSession = true;
         updateButtons();
         let systemAudioPromptActive = false;
+        const systemOnlyMode = els.systemOnlyToggle.checked;
+        if (systemOnlyMode) els.systemAudioToggle.checked = true;
 
         try {
           // Gọi getDisplayMedia trước getUserMedia để hộp thoại chia sẻ vẫn được trình duyệt cho phép.
-          if (els.systemAudioToggle.checked) {
+          if (els.systemAudioToggle.checked || systemOnlyMode) {
             systemAudioPromptActive = true;
             setNotice("Chọn tab, cửa sổ hoặc màn hình trong hộp thoại, sau đó bật “Chia sẻ âm thanh”.");
             systemStream = await requestSystemAudioStream();
@@ -1384,7 +1489,7 @@
           microphoneSource = audioContext.createMediaStreamSource(stream);
           // Chỉ dùng tín hiệu micro để phát hiện tiếng nói, tránh âm thanh trình duyệt kích hoạt ghi.
           microphoneSource.connect(analyser);
-          microphoneSource.connect(recordingDestination);
+          if (!systemOnlyMode) connectMicrophoneToRecording();
           audioData = new Uint8Array(analyser.fftSize);
 
           if (systemStream) {
@@ -1414,17 +1519,24 @@
             setNotice(`Lỗi ghi âm: ${event.error?.message || "không xác định"}`, "error");
           });
 
-          const sourceText = systemStream
-            ? "Micro và âm thanh trình duyệt/thiết bị đã sẵn sàng. Hãy nói để bắt đầu ghi âm."
-            : "Micro đã sẵn sàng. Hãy nói để bắt đầu ghi âm.";
+          const sourceText = systemOnlyMode
+            ? "Âm thanh trình duyệt/thiết bị đã sẵn sàng. Micro không được ghi vào file."
+            : systemStream
+              ? "Micro và âm thanh trình duyệt/thiết bị đã sẵn sàng. Hãy nói để bắt đầu ghi âm."
+              : "Micro đã sẵn sàng. Hãy nói để bắt đầu ghi âm.";
           setStatus("waiting", "Đang chờ tiếng nói", sourceText);
-          setNotice(systemStream
-            ? "Đang nghe micro và âm thanh trình duyệt/thiết bị. Bản ghi chỉ bắt đầu khi phát hiện tiếng nói."
-            : "Đang nghe micro. Bản ghi chỉ bắt đầu khi phát hiện tiếng nói.");
+          setNotice(systemOnlyMode
+            ? "Đang nghe micro để phát hiện tiếng nói nhưng chỉ ghi âm thanh trình duyệt/thiết bị."
+            : systemStream
+              ? "Đang nghe micro và âm thanh trình duyệt/thiết bị. Bản ghi chỉ bắt đầu khi phát hiện tiếng nói."
+              : "Đang nghe micro. Bản ghi chỉ bắt đầu khi phát hiện tiếng nói.");
           updateButtons();
           animationId = requestAnimationFrame(drawWaveform);
         } catch (error) {
-          if (systemAudioPromptActive) els.systemAudioToggle.checked = false;
+          if (systemAudioPromptActive) {
+            els.systemAudioToggle.checked = false;
+            els.systemOnlyToggle.checked = false;
+          }
           cleanupAudioSession();
           const message = systemAudioPromptActive
             ? systemAudioErrorMessage(error)
@@ -1508,6 +1620,7 @@
         }
       });
       els.systemAudioToggle.addEventListener("change", () => {
+        if (els.systemOnlyToggle.checked) return;
         if (!isMonitoring) {
           setNotice(els.systemAudioToggle.checked
             ? "Âm thanh trình duyệt/thiết bị sẽ được ghi cùng micro ở phiên tiếp theo."
@@ -1518,6 +1631,7 @@
         if (els.systemAudioToggle.checked) enableSystemAudio();
         else disableSystemAudio();
       });
+      els.systemOnlyToggle.addEventListener("change", handleSystemOnlyToggle);
       els.themeToggle.addEventListener("click", toggleTheme);
       window.addEventListener("resize", initializeCanvas);
 

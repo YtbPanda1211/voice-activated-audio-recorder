@@ -682,7 +682,7 @@
       <div class="capture-option">
         <div>
           <label for="systemAudioToggle">Ghi âm âm thanh trình duyệt / thiết bị</label>
-          <small id="systemAudioHelp">Bật để ghi cùng lúc âm thanh từ tab, cửa sổ hoặc màn hình và tiếng nói từ micro. Âm thanh được lấy từ audio track gốc, gain cố định 1.0 và không phát lại qua loa. Khi được hỏi, hãy chọn nguồn chia sẻ và bật <strong>Chia sẻ âm thanh</strong>.</small>
+          <small id="systemAudioHelp">Bật để ghi cùng lúc âm thanh từ tab, cửa sổ hoặc màn hình và tiếng nói từ micro. Âm thanh phát trên thiết bị vẫn có thể tăng/giảm bình thường; đường ghi dùng audio track gốc với gain cố định 1.0. Khi được hỏi, hãy chọn nguồn chia sẻ và bật <strong>Chia sẻ âm thanh</strong>.</small>
         </div>
         <label class="switch" title="Bật hoặc tắt ghi âm âm thanh trình duyệt/thiết bị">
           <input id="systemAudioToggle" type="checkbox" aria-describedby="systemAudioHelp" />
@@ -768,7 +768,7 @@
       </div>
     </section>
 
-    <p class="footer-note">Credit: Trang web này được tạo bởi <strong>SEONG</strong> hoặc <strong>Rice Field</strong>. Trang web được tạo với ý tưởng ngẫu hứng chơi.</p>
+    <p class="footer-note">Credit: Trang web này được tạo bởi <strong>SEONG</strong> hoặc <strong>Rice Field</strong>. Trang web được tạo với ý tưởng chơi chơi ngẫu hứng.</p>
   </main>
 
   <script>
@@ -1076,18 +1076,11 @@
           throw error;
         }
 
-        let capturedStream;
-        try {
-          // Không phát lại qua loa; bản thu lấy trực tiếp audio track đã chia sẻ.
-          capturedStream = await navigator.mediaDevices.getDisplayMedia({
-            video: true,
-            audio: { suppressLocalAudioPlayback: true }
-          });
-        } catch (error) {
-          // Một số trình duyệt chưa hiểu constraint này nhưng vẫn hỗ trợ chia sẻ audio.
-          if (error?.name !== "TypeError" && error?.name !== "OverconstrainedError") throw error;
-          capturedStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-        }
+        // Giữ nguyên âm thanh đang phát trên thiết bị; bản ghi lấy audio track riêng.
+        const capturedStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: true
+        });
 
         if (!capturedStream.getAudioTracks().length) {
           stopStreamTracks(capturedStream);
@@ -1794,5 +1787,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d1ac966a4a0397',t:'MTc4OTc0ODM4Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d1be67a87809cc',t:'MTc4OTc0OTExNg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

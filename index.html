@@ -682,7 +682,7 @@
       <div class="capture-option">
         <div>
           <label for="systemAudioToggle">Ghi âm âm thanh trình duyệt / thiết bị</label>
-          <small id="systemAudioHelp">Bật để ghi cùng lúc âm thanh từ tab, cửa sổ hoặc màn hình và tiếng nói từ micro. Khi được hỏi, hãy chọn nguồn chia sẻ và bật <strong>Chia sẻ âm thanh</strong>.</small>
+          <small id="systemAudioHelp">Bật để ghi cùng lúc âm thanh từ tab, cửa sổ hoặc màn hình và tiếng nói từ micro. Âm thanh được lấy từ audio track gốc, gain cố định 1.0 và không phát lại qua loa. Khi được hỏi, hãy chọn nguồn chia sẻ và bật <strong>Chia sẻ âm thanh</strong>.</small>
         </div>
         <label class="switch" title="Bật hoặc tắt ghi âm âm thanh trình duyệt/thiết bị">
           <input id="systemAudioToggle" type="checkbox" aria-describedby="systemAudioHelp" />
@@ -768,7 +768,7 @@
       </div>
     </section>
 
-    <p class="footer-note">Credit: Trang web này được tạo bởi <strong>SEONG</strong> hay <strong>Rice Field</strong>. Trang web được tạo với ý tưởng ngẫu hứng chơi.</p>
+    <p class="footer-note">Mẹo: nên chạy trang bằng <strong>localhost</strong> hoặc <strong>HTTPS</strong> để quyền micro hoạt động ổn định. Âm thanh không được gửi lên máy chủ.</p>
   </main>
 
   <script>
@@ -819,6 +819,7 @@
       let microphoneSource = null;
       let microphoneRecordingConnected = false;
       let systemSource = null;
+      let systemGainNode = null;
       let recordingDestination = null;
       let mediaRecorder = null;
       let animationId = null;
@@ -1075,10 +1076,18 @@
           throw error;
         }
 
-        const capturedStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: true
-        });
+        let capturedStream;
+        try {
+          // Không phát lại qua loa; bản thu lấy trực tiếp audio track đã chia sẻ.
+          capturedStream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: { suppressLocalAudioPlayback: true }
+          });
+        } catch (error) {
+          // Một số trình duyệt chưa hiểu constraint này nhưng vẫn hỗ trợ chia sẻ audio.
+          if (error?.name !== "TypeError" && error?.name !== "OverconstrainedError") throw error;
+          capturedStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        }
 
         if (!capturedStream.getAudioTracks().length) {
           stopStreamTracks(capturedStream);
@@ -1113,17 +1122,26 @@
         if (hasLiveAudio) return;
 
         const endedSystemSource = systemSource;
-        if (endedSystemSource && recordingDestination) {
+        const endedSystemGain = systemGainNode;
+        if (endedSystemGain && recordingDestination) {
           try {
-            endedSystemSource.disconnect(recordingDestination);
+            endedSystemGain.disconnect(recordingDestination);
           } catch (error) {
             // Node có thể đã tự ngắt khi track chia sẻ kết thúc.
           }
         }
-        disconnectDetectionSource(endedSystemSource);
+        if (endedSystemSource && endedSystemGain) {
+          try {
+            endedSystemSource.disconnect(endedSystemGain);
+          } catch (error) {
+            // Node có thể đã tự ngắt khi track chia sẻ kết thúc.
+          }
+        }
+        disconnectDetectionSource(endedSystemGain || endedSystemSource);
         const endedSystemStream = systemStream;
         const wasSystemOnly = els.systemOnlyToggle.checked;
         systemSource = null;
+        systemGainNode = null;
         systemStream = null;
         stopStreamTracks(endedSystemStream);
         els.systemAudioToggle.checked = false;
@@ -1162,10 +1180,15 @@
 
         try {
           const source = audioContext.createMediaStreamSource(capturedStream);
-          source.connect(recordingDestination);
-          if (els.systemOnlyToggle.checked) connectDetectionSource(source);
+          const unityGain = audioContext.createGain();
+          // Gain cố định 1.0: không tự tăng/giảm âm lượng và không phụ thuộc loa thiết bị.
+          unityGain.gain.setValueAtTime(1.0, audioContext.currentTime);
+          source.connect(unityGain);
+          unityGain.connect(recordingDestination);
+          if (els.systemOnlyToggle.checked) connectDetectionSource(unityGain);
           systemStream = capturedStream;
           systemSource = source;
+          systemGainNode = unityGain;
           attachSystemStreamHandlers(capturedStream);
         } catch (error) {
           stopStreamTracks(capturedStream);
@@ -1174,15 +1197,26 @@
       }
 
       function disableSystemAudio(showNotice = true) {
-        if (systemSource && recordingDestination) {
+        const currentSystemSource = systemSource;
+        const currentSystemGain = systemGainNode;
+        if (currentSystemGain && recordingDestination) {
           try {
-            systemSource.disconnect(recordingDestination);
+            currentSystemGain.disconnect(recordingDestination);
           } catch (error) {
             // Đã ngắt kết nối trước đó.
           }
         }
+        if (currentSystemSource && currentSystemGain) {
+          try {
+            currentSystemSource.disconnect(currentSystemGain);
+          } catch (error) {
+            // Đã ngắt kết nối trước đó.
+          }
+        }
+        disconnectDetectionSource(currentSystemGain || currentSystemSource);
         const currentSystemStream = systemStream;
         systemSource = null;
+        systemGainNode = null;
         systemStream = null;
         stopStreamTracks(currentSystemStream);
         if (showNotice && isMonitoring) {
@@ -1246,7 +1280,7 @@
           if (!systemStream) await enableSystemAudio();
           if (els.systemOnlyToggle.checked && systemStream) {
             disconnectMicrophoneFromRecording();
-            connectDetectionSource(systemSource);
+            connectDetectionSource(systemGainNode || systemSource);
             startSystemOnlyRecording();
             setNotice("Đang chỉ ghi âm thanh trình duyệt/thiết bị; không cần nói hoặc dùng micro.", "success");
           }
@@ -1266,7 +1300,7 @@
         }
 
         els.systemOnlyToggle.checked = false;
-        disconnectDetectionSource(systemSource);
+        disconnectDetectionSource(systemGainNode || systemSource);
         connectDetectionSource(microphoneSource);
         connectMicrophoneToRecording();
 
@@ -1294,6 +1328,7 @@
         const currentDetectionSource = detectionSource;
         const currentMicrophoneSource = microphoneSource;
         const currentSystemSource = systemSource;
+        const currentSystemGain = systemGainNode;
         const currentRecordingDestination = recordingDestination;
         const currentMicrophoneStream = stream;
         const currentSystemStream = systemStream;
@@ -1313,9 +1348,16 @@
             // Source có thể đã được ngắt khi trình duyệt dừng capture.
           }
         }
-        if (currentSystemSource && currentRecordingDestination) {
+        if (currentSystemGain && currentRecordingDestination) {
           try {
-            currentSystemSource.disconnect(currentRecordingDestination);
+            currentSystemGain.disconnect(currentRecordingDestination);
+          } catch (error) {
+            // Gain node có thể đã được ngắt khi trình duyệt dừng capture.
+          }
+        }
+        if (currentSystemSource && currentSystemGain) {
+          try {
+            currentSystemSource.disconnect(currentSystemGain);
           } catch (error) {
             // Source có thể đã được ngắt khi trình duyệt dừng capture.
           }
@@ -1330,6 +1372,7 @@
         microphoneSource = null;
         microphoneRecordingConnected = false;
         systemSource = null;
+        systemGainNode = null;
         recordingDestination = null;
         mediaRecorder = null;
         audioData = null;
@@ -1751,5 +1794,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d188afbb5585b2',t:'MTc4OTc0NjkxNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d1ac966a4a0397',t:'MTc4OTc0ODM4Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

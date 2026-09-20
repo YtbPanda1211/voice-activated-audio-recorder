@@ -2,6 +2,7 @@
 Voice-Activated-Audio-Recorder
 
 16/9/2026 : 
+
 🚀 Biến sự im lặng thành khoảng trống biến mất: Trải nghiệm ghi âm thông minh thế hệ mới ✨
 ⏰ Các phần mềm ghi âm truyền thống đang khiến chúng ta lãng phí thời gian: bạn phải bấm thủ công liên tục 🖱️, tạo ra những file chứa đầy tiếng tạp âm hay khoảng im lặng vô nghĩa 🤫, rồi mất công cắt ghép để có 1 đoạn ghi âm ưng ý ✂️.
 💡 "Bộ ghi âm thông minh" chạy trực tiếp trên web của tôi ra đời để giải quyết triệt để nỗi đau đó bằng 3 điểm đột phá:
@@ -12,6 +13,7 @@ Voice-Activated-Audio-Recorder
 
 
 19/9/2026 :
+
 ## 🎨 Cập nhật tính năng & giao diện mới
 ---
 ### 1️⃣ Chuyển đổi giao diện Sáng / Tối (Dark / Light Mode)

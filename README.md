@@ -1,12 +1,9 @@
 # voice-activated-audio-recorder
 Voice-Activated-Audio-Recorder
-
-
-
-
-
-
-16/9/2026 : 
+---
+---
+---
+### 16/9/2026 : 
 
 🚀 Biến sự im lặng thành khoảng trống biến mất: 
 Trải nghiệm ghi âm thông minh thế hệ mới ✨
@@ -27,12 +24,13 @@ Xử lý hoàn toàn ngay trên thiết bị (Client-side) 💻🔒,
 dữ liệu nằm gọn trong bộ nhớ tạm để bạn nghe lại 🎧, 
 tải xuống 📥 hoặc xóa vĩnh viễn ngay lập tức chỉ với một cú click ❌.
 💎 Một công cụ nhỏ, giải phóng những phiền toái lớn — mang lại trải nghiệm ghi chú rảnh tay và thông minh hơn bao giờ hết 🌟.
-
-
-19/9/2026 :
+---
+---
+---
+---
+### 19/9/2026 :
 
 ## 🎨 Cập nhật tính năng & giao diện mới
----
 ### 1️⃣ Chuyển đổi giao diện Sáng / Tối (Dark / Light Mode)
 * **Chức năng mới**:
 * 1.1 🌙/☀️ Thêm nút **Chế độ tối / Chế độ sáng** ở góc trên bên phải.
@@ -46,7 +44,6 @@ tải xuống 📥 hoặc xóa vĩnh viễn ngay lập tức chỉ với một c
 * **Hướng dẫn sử dụng**:
 * 1.8 💾 Lựa chọn lưu bằng `localStorage` (giữ trạng thái khi F5/mở lại).
 * 1.9 🖥️ Tự động nhận diện theo theme hệ điều hành nếu chưa chọn thủ công.
----
 ### 2️⃣ Ghi âm kết hợp (Mic + Trình duyệt / Thiết bị)
 * **Chức năng mới**:
 * 2.1 🎛️ Thêm công tắc **“Ghi âm âm thanh trình duyệt / thiết bị”**.
@@ -62,7 +59,6 @@ tải xuống 📥 hoặc xóa vĩnh viễn ngay lập tức chỉ với một c
 * 2.8 3️⃣ Chọn tab/cửa sổ/màn hình trong hộp thoại trình duyệt.
 * 2.9 4️⃣ Tích chọn **Chia sẻ âm thanh (Share audio)**.
 * 2.10 🎤 Cho phép quyền truy cập micro.
----
 ### 3️⃣ Chỉ ghi âm trình duyệt / thiết bị (Solo System Audio)
 * **Trạng thái Khi bật**:
 * 3.1 🔒 Tự động kích hoạt ghi âm trình duyệt/thiết bị, vô hiệu hóa âm thanh mic vào file.
@@ -81,6 +77,7 @@ tải xuống 📥 hoặc xóa vĩnh viễn ngay lập tức chỉ với một c
 * 3.11 3️⃣ Chọn nguồn (tab/cửa sổ/màn hình) + bật **Chia sẻ âm thanh**.
 * 3.12 🎵 Phát video/nhạc thoải mái không cần thoại.
 * 3.13 ⚠️ Tắt giữa chừng $\rightarrow$ trang bật lại yêu cầu quyền mic để trả về chế độ 1 hoặc 2.
-
+---
+---
 👇 Trải nghiệm thử miễn phí tại đường link dưới đây: 
 https://ytbpanda1211.github.io/voice-activated-audio-recorder/ 

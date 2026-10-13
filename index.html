@@ -687,8 +687,8 @@
         <div class="setting-control">
           <label for="thresholdInput">Độ nhạy nhận tiếng nói</label>
           <div class="range-row">
-            <input id="thresholdInput" type="range" min="0.001" max="0.12" step="0.001" value="0.001" />
-            <span id="thresholdValue" class="threshold-value">0.001</span>
+            <input id="thresholdInput" type="range" min="0.001" max="0.12" step="0.001" value="0.015" />
+            <span id="thresholdValue" class="threshold-value">0.015</span>
           </div>
           <small>Ngưỡng thấp sẽ nhạy hơn, phù hợp với giọng nhỏ và thì thầm. Hệ thống đã khuếch đại riêng tín hiệu để phát hiện, không làm thay đổi âm thanh lưu trong file.</small>
         </div>
@@ -913,7 +913,9 @@
       let transcriptStopRequested = false;
       let browserTranscriptStopRequested = false;
       let transcriptSegments = [];
+      let transcriptSequence = 0;
       let transcriptInterim = { mic: "", browser: "" };
+      let transcriptInterimTime = { mic: 0, browser: 0 };
       let transcriptManuallyEdited = false;
       let transcriptDownloadUrl = "";
       let recordingUsedSystemOnly = false;
@@ -1080,11 +1082,25 @@
       }
 
       function getCombinedTranscript() {
-        const finalLines = transcriptSegments.map((segment) => `(${sourceLabel(segment.source)}) ${segment.text}`);
-        const interimLines = Object.entries(transcriptInterim)
-          .filter(([, text]) => text)
-          .map(([source, text]) => `(${sourceLabel(source)}) ${text}`);
-        return [...finalLines, ...interimLines].join("\n").trim();
+        const lines = transcriptSegments.map((segment) => ({
+          time: segment.time,
+          sequence: segment.sequence,
+          text: `(${sourceLabel(segment.source)}) ${segment.text}`
+        }));
+        Object.entries(transcriptInterim).forEach(([source, text]) => {
+          if (text) {
+            lines.push({
+              time: transcriptInterimTime[source] || performance.now(),
+              sequence: Number.MAX_SAFE_INTEGER,
+              text: `(${sourceLabel(source)}) ${text}`
+            });
+          }
+        });
+        return lines
+          .sort((a, b) => a.time - b.time || a.sequence - b.sequence)
+          .map((line) => line.text)
+          .join("\n")
+          .trim();
       }
 
       function getEditableTranscript() {
@@ -1118,7 +1134,9 @@
           transcriptDownloadUrl = "";
         }
         transcriptSegments = [];
+        transcriptSequence = 0;
         transcriptInterim = { mic: "", browser: "" };
+        transcriptInterimTime = { mic: 0, browser: 0 };
         transcriptManuallyEdited = false;
         els.transcriptText.value = "";
         els.transcriptPreview.textContent = "Chưa có nội dung xem trước.";
@@ -1128,10 +1146,12 @@
         els.clearTranscriptBtn.disabled = true;
       }
 
-      function appendTranscriptFinal(source, text) {
+      function appendTranscriptFinal(source, text, time = performance.now()) {
         const cleanText = text.trim().replace(/\s+/g, " ");
         if (!cleanText) return;
-        transcriptSegments.push({ source, text: cleanText });
+        transcriptSegments.push({ source, text: cleanText, time, sequence: transcriptSequence });
+        transcriptSequence += 1;
+        transcriptSegments.sort((a, b) => a.time - b.time || a.sequence - b.sequence);
       }
 
       function createSpeechRecognition(source) {
@@ -1142,7 +1162,7 @@
         recognition.lang = "vi-VN";
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.maxAlternatives = 1;
+        recognition.maxAlternatives = 3;
 
         recognition.onstart = () => {
           if (source === "mic") {
@@ -1156,13 +1176,20 @@
 
         recognition.onresult = (event) => {
           let interimText = "";
+          const resultTime = performance.now();
           for (let index = event.resultIndex; index < event.results.length; index += 1) {
             const result = event.results[index];
-            const text = result[0]?.transcript || "";
-            if (result.isFinal) appendTranscriptFinal(source, text);
+            let bestAlternative = result[0];
+            for (let alternativeIndex = 1; alternativeIndex < result.length; alternativeIndex += 1) {
+              const alternative = result[alternativeIndex];
+              if ((alternative?.confidence || 0) > (bestAlternative?.confidence || 0)) bestAlternative = alternative;
+            }
+            const text = bestAlternative?.transcript || "";
+            if (result.isFinal) appendTranscriptFinal(source, text, resultTime);
             else interimText += text;
           }
           transcriptInterim[source] = interimText.trim();
+          transcriptInterimTime[source] = resultTime;
           renderTranscript(true);
           els.transcriptStatus.textContent = `Đang nhận dạng tiếng nói từ ${sourceLabel(source)}…`;
         };
@@ -1233,6 +1260,7 @@
         const allowBeforeRecording = options.allowBeforeRecording === true;
         const forceDefaultMicrophone = options.forceDefaultMicrophone === true;
         if ((!isMonitoring && !isStartingSession && !allowBeforeRecording) || els.systemOnlyToggle.checked) return;
+        els.transcriptCard.classList.remove("hidden");
         if (!initializeSpeechRecognition()) {
           setNotice("Trình duyệt không hỗ trợ nhận dạng giọng nói. Hãy dùng Chrome hoặc Edge bản mới để tạo văn bản.", "error");
           return;
@@ -1273,6 +1301,7 @@
 
       function startBrowserSpeechRecognition() {
         if (!isMonitoring || !systemStream || !els.systemAudioToggle.checked) return;
+        els.transcriptCard.classList.remove("hidden");
         if (!initializeSpeechRecognition() || !browserTranscriptRecognition) return;
         const audioTrack = systemStream.getAudioTracks().find((track) => track.readyState === "live");
         if (!audioTrack) return;
@@ -2292,5 +2321,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49c3460db71a29d',t:'MTc5MTg3MjA3MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49c46779c2dd84a',t:'MTc5MTg3MjgxMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

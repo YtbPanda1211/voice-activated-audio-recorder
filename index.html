@@ -682,10 +682,10 @@
         <div class="setting-control">
           <label for="thresholdInput">Độ nhạy nhận tiếng nói</label>
           <div class="range-row">
-            <input id="thresholdInput" type="range" min="0.015" max="0.12" step="0.005" value="0.045" />
-            <span id="thresholdValue" class="threshold-value">0.045</span>
+            <input id="thresholdInput" type="range" min="0.002" max="0.12" step="0.001" value="0.018" />
+            <span id="thresholdValue" class="threshold-value">0.018</span>
           </div>
-          <small>Ngưỡng thấp sẽ nhạy hơn, phù hợp khi bạn nói nhỏ. Nếu môi trường nhiều tiếng ồn, hãy tăng ngưỡng.</small>
+          <small>Ngưỡng thấp sẽ nhạy hơn, phù hợp với giọng nhỏ và thì thầm. Hệ thống đã khuếch đại riêng tín hiệu để phát hiện, không làm thay đổi âm thanh lưu trong file.</small>
         </div>
         <div class="setting-control">
           <label for="silenceInput">Thời gian im lặng trước khi tạm dừng</label>
@@ -867,6 +867,8 @@
       let analyser = null;
       let detectionSource = null;
       let microphoneSource = null;
+      let microphoneDetectionGain = null;
+      let microphoneDetectionCompressor = null;
       let microphoneRecordingConnected = false;
       let systemSource = null;
       let systemGainNode = null;
@@ -876,7 +878,9 @@
       let monitorTimer = null;
       let wakeLock = null;
       let audioData = null;
+      let floatAudioData = null;
       let smoothedRms = 0;
+      let noiseFloorRms = 0.0015;
       let speechState = false;
       let silenceStartedAt = null;
       let segmentStartedAt = null;
@@ -1262,6 +1266,27 @@
         }
       }
 
+      function setupMicrophoneDetection() {
+        if (!audioContext || !microphoneSource || microphoneDetectionCompressor) return;
+
+        microphoneDetectionGain = audioContext.createGain();
+        microphoneDetectionGain.gain.setValueAtTime(4.0, audioContext.currentTime);
+        microphoneDetectionCompressor = audioContext.createDynamicsCompressor();
+        microphoneDetectionCompressor.threshold.setValueAtTime(-48, audioContext.currentTime);
+        microphoneDetectionCompressor.knee.setValueAtTime(30, audioContext.currentTime);
+        microphoneDetectionCompressor.ratio.setValueAtTime(12, audioContext.currentTime);
+        microphoneDetectionCompressor.attack.setValueAtTime(0.003, audioContext.currentTime);
+        microphoneDetectionCompressor.release.setValueAtTime(0.25, audioContext.currentTime);
+        // Đây là nhánh phát hiện riêng, không nối vào MediaStreamDestination nên không đổi âm thanh bản ghi.
+        microphoneSource.connect(microphoneDetectionGain);
+        microphoneDetectionGain.connect(microphoneDetectionCompressor);
+      }
+
+      function connectMicrophoneDetection() {
+        setupMicrophoneDetection();
+        connectDetectionSource(microphoneDetectionCompressor);
+      }
+
       function connectMicrophoneToRecording() {
         if (!microphoneSource || !recordingDestination || microphoneRecordingConnected) return;
         microphoneSource.connect(recordingDestination);
@@ -1318,7 +1343,8 @@
         return navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
-            noiseSuppression: true,
+            // Tắt noise suppression để không vô tình cắt mất giọng thì thầm; nhánh phát hiện có bộ lọc riêng.
+            noiseSuppression: false,
             autoGainControl: true
           },
           video: false
@@ -1364,7 +1390,7 @@
           els.systemOnlyToggle.checked = false;
           if (stream && microphoneSource) {
             recordingUsedSystemOnly = false;
-            connectDetectionSource(microphoneSource);
+            connectMicrophoneDetection();
             connectMicrophoneToRecording();
             startSpeechRecognition();
           } else if (isMonitoring && mediaRecorder?.state !== "inactive") {
@@ -1523,7 +1549,7 @@
         els.systemOnlyToggle.checked = false;
         recordingUsedSystemOnly = false;
         disconnectDetectionSource(systemGainNode || systemSource);
-        connectDetectionSource(microphoneSource);
+        connectMicrophoneDetection();
         connectMicrophoneToRecording();
         startSpeechRecognition();
 
@@ -1591,12 +1617,16 @@
         analyser = null;
         detectionSource = null;
         microphoneSource = null;
+        microphoneDetectionGain = null;
+        microphoneDetectionCompressor = null;
         microphoneRecordingConnected = false;
         systemSource = null;
         systemGainNode = null;
         recordingDestination = null;
         mediaRecorder = null;
         audioData = null;
+        floatAudioData = null;
+        noiseFloorRms = 0.0015;
         isMonitoring = false;
         isStartingSession = false;
         systemAudioRequestInProgress = false;
@@ -1759,21 +1789,37 @@
       function drawWaveformFrame() {
         if (!isMonitoring || !analyser || !audioData) return;
 
-        analyser.getByteTimeDomainData(audioData);
+        // Dùng float PCM để không làm mất các dao động rất nhỏ của giọng thì thầm.
         let sum = 0;
-        for (let i = 0; i < audioData.length; i += 1) {
-          const normalized = (audioData[i] - 128) / 128;
-          sum += normalized * normalized;
+        if (floatAudioData && typeof analyser.getFloatTimeDomainData === "function") {
+          analyser.getFloatTimeDomainData(floatAudioData);
+          for (let i = 0; i < floatAudioData.length; i += 1) {
+            sum += floatAudioData[i] * floatAudioData[i];
+          }
+        } else {
+          analyser.getByteTimeDomainData(audioData);
+          for (let i = 0; i < audioData.length; i += 1) {
+            const normalized = (audioData[i] - 128) / 128;
+            sum += normalized * normalized;
+          }
         }
+        // Byte data vẫn dùng cho waveform; RMS dùng float data ở trên để có độ phân giải cao hơn.
+        analyser.getByteTimeDomainData(audioData);
 
         const rawRms = Math.sqrt(sum / audioData.length);
-        smoothedRms = (smoothedRms * 0.82) + (rawRms * 0.18);
+        smoothedRms = (smoothedRms * 0.70) + (rawRms * 0.30);
         const level = Math.min(1, smoothedRms * 5.5);
         els.levelBar.style.width = `${level * 100}%`;
 
+        // Tự ước lượng nền ồn khi chưa phát hiện tiếng nói, nhưng vẫn giữ ngưỡng nhạy người dùng chọn.
+        if (!speechState && smoothedRms < speechThreshold * 0.9) {
+          noiseFloorRms = (noiseFloorRms * 0.96) + (smoothedRms * 0.04);
+        }
+        const adaptiveStartThreshold = Math.max(speechThreshold, (noiseFloorRms * 1.35) + 0.0008);
+        const adaptiveReleaseThreshold = Math.max((speechThreshold * 0.60), (noiseFloorRms * 1.10) + 0.0003);
         const isSpeaking = speechState
-          ? smoothedRms >= speechThreshold * 0.72
-          : smoothedRms >= speechThreshold;
+          ? smoothedRms >= adaptiveReleaseThreshold
+          : smoothedRms >= adaptiveStartThreshold;
         speechState = isSpeaking;
         processSpeechDetection(isSpeaking, performance.now());
 
@@ -1918,11 +1964,13 @@
             microphoneSource = audioContext.createMediaStreamSource(stream);
             // Ở chế độ bình thường, chỉ dùng tín hiệu micro để phát hiện tiếng nói.
             if (!systemOnlyMode) {
-              connectDetectionSource(microphoneSource);
+              connectMicrophoneDetection();
               connectMicrophoneToRecording();
             }
           }
           audioData = new Uint8Array(analyser.fftSize);
+          floatAudioData = new Float32Array(analyser.fftSize);
+          noiseFloorRms = 0.0015;
 
           if (systemStream) {
             connectSystemAudioStream(systemStream);
@@ -2093,5 +2141,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49b6757e853dd8b',t:'MTc5MTg2MzY3Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49bbf815fac9b15',t:'MTc5MTg2NzI4NA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

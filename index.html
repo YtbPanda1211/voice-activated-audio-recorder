@@ -829,6 +829,8 @@
       "use strict";
 
       const DEFAULT_SILENCE_LIMIT_MS = 5000;
+      const TRANSCRIPT_RESTART_DELAY_MS = 80;
+      const TRANSCRIPT_MAX_ALTERNATIVES = 5;
       const THEME_STORAGE_KEY = "voice-recorder-theme";
       const DEFAULT_STATUS_DETAIL = "Nhấn “Bắt đầu nghe” để cấp quyền micro và chờ tiếng nói.";
 
@@ -1081,6 +1083,16 @@
         return source === "browser" ? "Trình duyệt" : "Mic";
       }
 
+      function normalizeRecognizedText(text) {
+        return String(text || "")
+          .normalize("NFC")
+          .replace(/[\\t\\r\\n]+/g, " ")
+          .replace(/\\s+/g, " ")
+          .replace(/\\s+([,.!?;:])/g, "$1")
+          .replace(/([,.!?;:])(?=\\S)/g, "$1 ")
+          .trim();
+      }
+
       function getCombinedTranscript() {
         const lines = transcriptSegments.map((segment) => ({
           time: segment.time,
@@ -1147,7 +1159,7 @@
       }
 
       function appendTranscriptFinal(source, text, time = performance.now()) {
-        const cleanText = text.trim().replace(/\s+/g, " ");
+        const cleanText = normalizeRecognizedText(text);
         if (!cleanText) return;
         transcriptSegments.push({ source, text: cleanText, time, sequence: transcriptSequence });
         transcriptSequence += 1;
@@ -1162,7 +1174,8 @@
         recognition.lang = "vi-VN";
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.maxAlternatives = 3;
+        // Cho phép trình duyệt trả về nhiều phương án để chọn phương án có độ tin cậy cao hơn.
+        recognition.maxAlternatives = TRANSCRIPT_MAX_ALTERNATIVES;
 
         recognition.onstart = () => {
           if (source === "mic") {
@@ -1186,9 +1199,9 @@
             }
             const text = bestAlternative?.transcript || "";
             if (result.isFinal) appendTranscriptFinal(source, text, resultTime);
-            else interimText += text;
+            else interimText += `${interimText ? " " : ""}${text}`;
           }
-          transcriptInterim[source] = interimText.trim();
+          transcriptInterim[source] = normalizeRecognizedText(interimText);
           transcriptInterimTime[source] = resultTime;
           renderTranscript(true);
           els.transcriptStatus.textContent = `Đang nhận dạng tiếng nói từ ${sourceLabel(source)}…`;
@@ -1235,7 +1248,7 @@
             window.setTimeout(() => {
               if (source === "mic") startSpeechRecognition();
               else startBrowserSpeechRecognition();
-            }, 250);
+            }, TRANSCRIPT_RESTART_DELAY_MS);
           }
         };
         return recognition;
@@ -1275,7 +1288,7 @@
         els.transcriptCard.classList.remove("hidden");
         els.transcriptStatus.textContent = "Đang khởi động nhận dạng giọng nói từ Mic…";
         try {
-          // Bắt đầu sớm bằng micro mặc định nếu đang ở click đầu phiên; sau đó vẫn dùng cùng phiên nhận dạng.
+          // Ưu tiên dùng đúng track micro của phiên ghi; trình duyệt cũ sẽ dùng micro mặc định ở nhánh fallback.
           if (micTrack) transcriptRecognition.start(micTrack);
           else transcriptRecognition.start();
         } catch (error) {
@@ -1456,7 +1469,9 @@
 
       function connectMicrophoneDetection() {
         setupMicrophoneDetection();
-        connectDetectionSource(microphoneDetectionCompressor);
+        // Đo trên nhánh khuếch đại riêng để ngưỡng 0.012–0.200 hữu ích với giọng nói nhỏ;
+        // nhánh này không nối vào MediaStreamDestination nên không làm đổi âm thanh được lưu.
+        connectDetectionSource(microphoneDetectionGain || microphoneDetectionCompressor);
       }
 
       function connectMicrophoneToRecording() {
@@ -1517,7 +1532,8 @@
             echoCancellation: true,
             // Tắt noise suppression để không vô tình cắt mất giọng thì thầm; nhánh phát hiện có bộ lọc riêng.
             noiseSuppression: false,
-            autoGainControl: true
+            // Giữ tín hiệu micro gốc; không để trình duyệt tự động khuếch đại đường âm thanh được lưu.
+            autoGainControl: false
           },
           video: false
         });
@@ -2321,5 +2337,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49c517738ab250b',t:'MTc5MTg3MzI2Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49c6193aee7a29d',t:'MTc5MTg3MzkyMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

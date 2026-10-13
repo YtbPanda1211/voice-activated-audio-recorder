@@ -682,8 +682,8 @@
         <div class="setting-control">
           <label for="thresholdInput">Độ nhạy nhận tiếng nói</label>
           <div class="range-row">
-            <input id="thresholdInput" type="range" min="0.002" max="0.12" step="0.001" value="0.018" />
-            <span id="thresholdValue" class="threshold-value">0.018</span>
+            <input id="thresholdInput" type="range" min="0.001" max="0.12" step="0.001" value="0.001" />
+            <span id="thresholdValue" class="threshold-value">0.001</span>
           </div>
           <small>Ngưỡng thấp sẽ nhạy hơn, phù hợp với giọng nhỏ và thì thầm. Hệ thống đã khuếch đại riêng tín hiệu để phát hiện, không làm thay đổi âm thanh lưu trong file.</small>
         </div>
@@ -772,7 +772,7 @@
       <div class="result-header">
         <div>
           <h2 id="transcript-title">Văn bản từ giọng nói</h2>
-          <p id="transcriptMeta">Bản chép lời được tạo trong lúc ghi âm bằng Speech Recognition của trình duyệt.</p>
+          <p id="transcriptMeta">Bản chép lời được tạo trong lúc ghi âm; mỗi đoạn sẽ có nhãn (Mic) hoặc (Trình duyệt).</p>
         </div>
       </div>
       <label class="sr-only" for="transcriptText">Nội dung văn bản từ bản ghi</label>
@@ -894,11 +894,15 @@
       let recordingBlob = null;
       let recordingUrl = "";
       let transcriptRecognition = null;
+      let browserTranscriptRecognition = null;
       let transcriptSupported = false;
+      let browserTranscriptSupported = false;
       let transcriptRunning = false;
+      let browserTranscriptRunning = false;
       let transcriptStopRequested = false;
-      let transcriptFinalText = "";
-      let transcriptInterimText = "";
+      let browserTranscriptStopRequested = false;
+      let transcriptSegments = [];
+      let transcriptInterim = { mic: "", browser: "" };
       let transcriptDownloadUrl = "";
       let recordingUsedSystemOnly = false;
       let lastStatus = "";
@@ -1059,12 +1063,16 @@
         updateButtons();
       }
 
+      function sourceLabel(source) {
+        return source === "browser" ? "Trình duyệt" : "Mic";
+      }
+
       function getCombinedTranscript() {
-        return [transcriptFinalText, transcriptInterimText]
-          .filter(Boolean)
-          .join(" ")
-          .replace(/\s+/g, " ")
-          .trim();
+        const finalLines = transcriptSegments.map((segment) => `(${sourceLabel(segment.source)}) ${segment.text}`);
+        const interimLines = Object.entries(transcriptInterim)
+          .filter(([, text]) => text)
+          .map(([source, text]) => `(${sourceLabel(source)}) ${text}`);
+        return [...finalLines, ...interimLines].join("\n").trim();
       }
 
       function renderTranscript(showCard = false) {
@@ -1080,8 +1088,8 @@
           URL.revokeObjectURL(transcriptDownloadUrl);
           transcriptDownloadUrl = "";
         }
-        transcriptFinalText = "";
-        transcriptInterimText = "";
+        transcriptSegments = [];
+        transcriptInterim = { mic: "", browser: "" };
         els.transcriptText.value = "";
         els.transcriptStatus.textContent = "";
         els.transcriptCard.classList.add("hidden");
@@ -1089,69 +1097,96 @@
         els.clearTranscriptBtn.disabled = true;
       }
 
-      function appendTranscriptFinal(text) {
-        const cleanText = text.trim();
+      function appendTranscriptFinal(source, text) {
+        const cleanText = text.trim().replace(/\s+/g, " ");
         if (!cleanText) return;
-        transcriptFinalText = transcriptFinalText
-          ? `${transcriptFinalText} ${cleanText}`
-          : cleanText;
+        transcriptSegments.push({ source, text: cleanText });
+      }
+
+      function createSpeechRecognition(source) {
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!Recognition) return null;
+
+        const recognition = new Recognition();
+        recognition.lang = "vi-VN";
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 1;
+
+        recognition.onstart = () => {
+          if (source === "mic") transcriptRunning = true;
+          else browserTranscriptRunning = true;
+          els.transcriptStatus.textContent = `Đang nhận dạng tiếng nói từ ${sourceLabel(source)}…`;
+        };
+
+        recognition.onresult = (event) => {
+          let interimText = "";
+          for (let index = event.resultIndex; index < event.results.length; index += 1) {
+            const result = event.results[index];
+            const text = result[0]?.transcript || "";
+            if (result.isFinal) appendTranscriptFinal(source, text);
+            else interimText += text;
+          }
+          transcriptInterim[source] = interimText.trim();
+          renderTranscript(true);
+          els.transcriptStatus.textContent = `Đang nhận dạng tiếng nói từ ${sourceLabel(source)}…`;
+        };
+
+        recognition.onerror = (event) => {
+          if (["aborted", "no-speech"].includes(event.error)) return;
+          const isMic = source === "mic";
+          if (["not-allowed", "service-not-allowed"].includes(event.error)) {
+            if (isMic) transcriptStopRequested = true;
+            else browserTranscriptStopRequested = true;
+            els.transcriptStatus.textContent = `Trình duyệt chưa cho phép nhận dạng từ ${sourceLabel(source)}.`;
+          } else if (event.error === "audio-capture" && source === "browser") {
+            browserTranscriptSupported = false;
+            els.transcriptStatus.textContent = "Trình duyệt không cho phép đưa audio track trình duyệt vào Speech Recognition.";
+          } else {
+            els.transcriptStatus.textContent = `Không thể nhận dạng ${sourceLabel(source)}: ${event.error || "lỗi không xác định"}.`;
+          }
+        };
+
+        recognition.onend = () => {
+          if (source === "mic") {
+            transcriptRunning = false;
+            transcriptInterim.mic = "";
+          } else {
+            browserTranscriptRunning = false;
+            transcriptInterim.browser = "";
+          }
+          renderTranscript();
+          if (!isMonitoring) {
+            if (transcriptStopRequested || browserTranscriptStopRequested) showTranscriptResult();
+            return;
+          }
+
+          const shouldRestart = source === "mic"
+            ? !transcriptStopRequested && !els.systemOnlyToggle.checked
+            : !browserTranscriptStopRequested && Boolean(systemStream) && Boolean(els.systemAudioToggle.checked);
+          if (shouldRestart) {
+            window.setTimeout(() => {
+              if (source === "mic") startSpeechRecognition();
+              else startBrowserSpeechRecognition();
+            }, 250);
+          }
+        };
+        return recognition;
       }
 
       function initializeSpeechRecognition() {
         const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!Recognition) {
           transcriptSupported = false;
+          browserTranscriptSupported = false;
           els.transcriptMeta.textContent = "Trình duyệt này không hỗ trợ nhận dạng giọng nói trực tiếp.";
           return false;
         }
-        if (transcriptRecognition) return true;
-
         transcriptSupported = true;
-        transcriptRecognition = new Recognition();
-        transcriptRecognition.lang = "vi-VN";
-        transcriptRecognition.continuous = true;
-        transcriptRecognition.interimResults = true;
-        transcriptRecognition.maxAlternatives = 1;
-
-        transcriptRecognition.onstart = () => {
-          transcriptRunning = true;
-          els.transcriptStatus.textContent = "Đang nhận dạng giọng nói tiếng Việt…";
-        };
-
-        transcriptRecognition.onresult = (event) => {
-          let interimText = "";
-          for (let index = event.resultIndex; index < event.results.length; index += 1) {
-            const result = event.results[index];
-            const text = result[0]?.transcript || "";
-            if (result.isFinal) appendTranscriptFinal(text);
-            else interimText += text;
-          }
-          transcriptInterimText = interimText.trim();
-          renderTranscript(true);
-          els.transcriptStatus.textContent = "Đang nhận dạng giọng nói tiếng Việt…";
-        };
-
-        transcriptRecognition.onerror = (event) => {
-          if (["aborted", "no-speech"].includes(event.error)) return;
-          if (["not-allowed", "service-not-allowed"].includes(event.error)) {
-            transcriptStopRequested = true;
-            els.transcriptStatus.textContent = "Trình duyệt chưa cho phép nhận dạng giọng nói.";
-          } else {
-            els.transcriptStatus.textContent = `Không thể nhận dạng giọng nói: ${event.error || "lỗi không xác định"}.`;
-          }
-        };
-
-        transcriptRecognition.onend = () => {
-          transcriptRunning = false;
-          renderTranscript();
-          if (!isMonitoring && transcriptStopRequested) showTranscriptResult();
-          if (isMonitoring && !transcriptStopRequested && !els.systemOnlyToggle.checked) {
-            window.setTimeout(() => {
-              if (isMonitoring && !transcriptStopRequested && !els.systemOnlyToggle.checked) startSpeechRecognition();
-            }, 250);
-          }
-        };
-        return true;
+        browserTranscriptSupported = true;
+        if (!transcriptRecognition) transcriptRecognition = createSpeechRecognition("mic");
+        if (!browserTranscriptRecognition) browserTranscriptRecognition = createSpeechRecognition("browser");
+        return Boolean(transcriptRecognition);
       }
 
       function startSpeechRecognition() {
@@ -1160,15 +1195,36 @@
 
         transcriptStopRequested = false;
         try {
+          // Không truyền track để dùng micro.
           transcriptRecognition.start();
         } catch (error) {
           if (error?.name !== "InvalidStateError") {
-            els.transcriptStatus.textContent = `Không thể bắt đầu nhận dạng: ${error.message || "lỗi không xác định"}.`;
+            els.transcriptStatus.textContent = `Không thể bắt đầu nhận dạng Mic: ${error.message || "lỗi không xác định"}.`;
           }
         }
       }
 
-      function stopSpeechRecognition() {
+      function startBrowserSpeechRecognition() {
+        if (!isMonitoring || !systemStream || !els.systemAudioToggle.checked) return;
+        if (!initializeSpeechRecognition() || !browserTranscriptRecognition) return;
+        const audioTrack = systemStream.getAudioTracks().find((track) => track.readyState === "live");
+        if (!audioTrack) return;
+
+        browserTranscriptStopRequested = false;
+        try {
+          // SpeechRecognition.start(MediaStreamTrack) nhận trực tiếp audio track trình duyệt.
+          browserTranscriptRecognition.start(audioTrack);
+        } catch (error) {
+          if (error?.name === "TypeError" || error?.name === "NotSupportedError") {
+            browserTranscriptSupported = false;
+            els.transcriptStatus.textContent = "Trình duyệt không hỗ trợ nhận dạng trực tiếp audio track trình duyệt.";
+          } else if (error?.name !== "InvalidStateError") {
+            els.transcriptStatus.textContent = `Không thể bắt đầu nhận dạng Trình duyệt: ${error.message || "lỗi không xác định"}.`;
+          }
+        }
+      }
+
+      function stopMicSpeechRecognition() {
         transcriptStopRequested = true;
         if (!transcriptRecognition || !transcriptRunning) return;
         try {
@@ -1178,25 +1234,40 @@
         }
       }
 
+      function stopBrowserSpeechRecognition() {
+        browserTranscriptStopRequested = true;
+        if (!browserTranscriptRecognition || !browserTranscriptRunning) return;
+        try {
+          browserTranscriptRecognition.stop();
+        } catch (error) {
+          // Recognition có thể đã tự kết thúc.
+        }
+      }
+
+      function stopSpeechRecognition() {
+        stopMicSpeechRecognition();
+        stopBrowserSpeechRecognition();
+      }
+
       function showTranscriptResult() {
         const text = getCombinedTranscript();
         els.transcriptCard.classList.remove("hidden");
         renderTranscript();
 
-        if (recordingUsedSystemOnly) {
-          els.transcriptMeta.textContent = "Chế độ chỉ ghi trình duyệt/thiết bị không dùng micro. Speech Recognition của trình duyệt không nhận trực tiếp audio track hệ thống.";
-          els.transcriptStatus.textContent = text
-            ? "Đã có văn bản từ phần ghi nhận trước khi chuyển sang chế độ chỉ thiết bị."
-            : "Không thể tự chép lời audio hệ thống bằng Web Speech API thuần trình duyệt.";
-        } else if (!transcriptSupported) {
-          els.transcriptMeta.textContent = "Trình duyệt không hỗ trợ Speech Recognition. Hãy dùng Chrome hoặc Edge để tạo văn bản tự động.";
+        if (!transcriptSupported && !browserTranscriptSupported) {
+          els.transcriptMeta.textContent = "Trình duyệt không hỗ trợ Speech Recognition. Hãy dùng Chrome hoặc Edge bản mới để tạo văn bản tự động.";
           els.transcriptStatus.textContent = "Không có văn bản tự động. Bản ghi âm vẫn có thể tải xuống.";
+        } else if (recordingUsedSystemOnly && !browserTranscriptSupported) {
+          els.transcriptMeta.textContent = "Không nhận dạng được audio track trình duyệt trên trình duyệt hiện tại.";
+          els.transcriptStatus.textContent = text
+            ? "Đã có văn bản từ nguồn khác trong phiên ghi."
+            : "Hãy dùng Chrome/Edge hỗ trợ SpeechRecognition.start(audioTrack) để nhận dạng tiếng nói trình duyệt.";
         } else if (text) {
-          els.transcriptMeta.textContent = "Văn bản được nhận dạng trực tiếp trong lúc ghi âm, ngôn ngữ: Tiếng Việt.";
-          els.transcriptStatus.textContent = "Bạn có thể chỉnh sửa nội dung sau khi tải file TXT về máy.";
+          els.transcriptMeta.textContent = "Văn bản được chia nguồn: (Mic) là tiếng nói từ micro, (Trình duyệt) là tiếng nói từ audio track trình duyệt.";
+          els.transcriptStatus.textContent = "Bạn có thể tải văn bản TXT xuống máy.";
         } else {
           els.transcriptMeta.textContent = "Chưa nhận được câu nói rõ ràng trong phiên ghi âm.";
-          els.transcriptStatus.textContent = "Hãy nói gần micro hơn hoặc dùng Chrome/Edge rồi thử lại.";
+          els.transcriptStatus.textContent = "Hãy nói gần micro hơn hoặc phát tiếng nói rõ trong tab trình duyệt rồi thử lại.";
         }
         renderTranscript(true);
       }
@@ -1212,8 +1283,9 @@
         document.body.appendChild(link);
         link.click();
         link.remove();
+        const downloadedUrl = transcriptDownloadUrl;
         window.setTimeout(() => {
-          if (transcriptDownloadUrl === link.href) {
+          if (transcriptDownloadUrl === downloadedUrl) {
             URL.revokeObjectURL(transcriptDownloadUrl);
             transcriptDownloadUrl = "";
           }
@@ -1361,6 +1433,7 @@
         if (!systemStream) return;
         const hasLiveAudio = systemStream.getAudioTracks().some((track) => track.readyState === "live");
         if (hasLiveAudio) return;
+        stopBrowserSpeechRecognition();
 
         const endedSystemSource = systemSource;
         const endedSystemGain = systemGainNode;
@@ -1433,6 +1506,7 @@
           systemSource = source;
           systemGainNode = unityGain;
           attachSystemStreamHandlers(capturedStream);
+          if (isMonitoring) startBrowserSpeechRecognition();
         } catch (error) {
           stopStreamTracks(capturedStream);
           throw error;
@@ -1440,6 +1514,7 @@
       }
 
       function disableSystemAudio(showNotice = true) {
+        stopBrowserSpeechRecognition();
         const currentSystemSource = systemSource;
         const currentSystemGain = systemGainNode;
         if (currentSystemGain && recordingDestination) {
@@ -1528,6 +1603,7 @@
             recordingUsedSystemOnly = true;
             disconnectMicrophoneFromRecording();
             connectDetectionSource(systemGainNode || systemSource);
+            startBrowserSpeechRecognition();
             startSystemOnlyRecording();
             setNotice("Đang chỉ ghi âm thanh trình duyệt/thiết bị; không cần nói hoặc dùng micro.", "success");
           }
@@ -1535,6 +1611,7 @@
         }
 
         const restoreSystemAudio = systemAudioChoiceBeforeOnly;
+        stopBrowserSpeechRecognition();
         try {
           // Nếu phiên chỉ thiết bị được khởi động không cần micro, xin quyền micro ở thời điểm chuyển chế độ.
           await ensureMicrophoneForSession();
@@ -2001,8 +2078,10 @@
 
           if (systemOnlyMode) {
             startSystemOnlyRecording();
+            if (systemStream) startBrowserSpeechRecognition();
           } else {
             startSpeechRecognition();
+            if (systemStream) startBrowserSpeechRecognition();
             const sourceText = systemStream
               ? "Micro và âm thanh trình duyệt/thiết bị đã sẵn sàng. Hãy nói để bắt đầu ghi âm."
               : "Micro đã sẵn sàng. Hãy nói để bắt đầu ghi âm.";
@@ -2141,5 +2220,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49bbf815fac9b15',t:'MTc5MTg2NzI4NA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49bdb3758cdddc9',t:'MTc5MTg2ODQxOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

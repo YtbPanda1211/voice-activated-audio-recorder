@@ -538,6 +538,7 @@
     .result-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
     .download-link { text-decoration: none; }
 
+    .transcript-card > label { display: block; margin-bottom: 7px; color: var(--ink); font-size: 0.88rem; font-weight: 760; }
     .transcript-textarea {
       display: block;
       width: 100%;
@@ -553,8 +554,12 @@
     }
 
     .transcript-textarea:focus { outline: 3px solid rgba(91, 92, 226, 0.18); outline-offset: 2px; }
+    .transcript-preview { margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: #f7f8fc; }
+    .transcript-preview-label { margin-bottom: 8px; color: var(--muted); font-size: 0.76rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+    .transcript-preview-text { min-height: 84px; margin: 0; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.65; }
     .transcript-status { min-height: 22px; margin: 12px 0 0; color: var(--muted); font-size: 0.82rem; line-height: 1.5; }
     html[data-theme="dark"] .transcript-textarea { border-color: var(--line); color: var(--ink); background: #111929; }
+    html[data-theme="dark"] .transcript-preview { border-color: var(--line); background: #151e30; }
 
     .tips {
       display: grid;
@@ -775,8 +780,12 @@
           <p id="transcriptMeta">Bản chép lời được tạo trong lúc ghi âm; mỗi đoạn sẽ có nhãn (Mic) hoặc (Trình duyệt).</p>
         </div>
       </div>
-      <label class="sr-only" for="transcriptText">Nội dung văn bản từ bản ghi</label>
-      <textarea id="transcriptText" class="transcript-textarea" readonly placeholder="Chưa nhận được văn bản."></textarea>
+      <label for="transcriptText">Chỉnh sửa nội dung văn bản</label>
+      <textarea id="transcriptText" class="transcript-textarea" placeholder="Chưa nhận được văn bản."></textarea>
+      <div class="transcript-preview">
+        <div class="transcript-preview-label">Xem trước nội dung hoàn chỉnh sẽ tải về</div>
+        <pre id="transcriptPreview" class="transcript-preview-text">Chưa có nội dung xem trước.</pre>
+      </div>
       <p id="transcriptStatus" class="transcript-status" role="status"></p>
       <div class="result-actions">
         <button id="downloadTranscriptBtn" class="button button-primary" type="button" disabled>
@@ -852,6 +861,7 @@
         transcriptCard: document.getElementById("transcriptCard"),
         transcriptMeta: document.getElementById("transcriptMeta"),
         transcriptText: document.getElementById("transcriptText"),
+        transcriptPreview: document.getElementById("transcriptPreview"),
         transcriptStatus: document.getElementById("transcriptStatus"),
         downloadTranscriptBtn: document.getElementById("downloadTranscriptBtn"),
         clearTranscriptBtn: document.getElementById("clearTranscriptBtn"),
@@ -903,6 +913,7 @@
       let browserTranscriptStopRequested = false;
       let transcriptSegments = [];
       let transcriptInterim = { mic: "", browser: "" };
+      let transcriptManuallyEdited = false;
       let transcriptDownloadUrl = "";
       let recordingUsedSystemOnly = false;
       let lastStatus = "";
@@ -1075,12 +1086,29 @@
         return [...finalLines, ...interimLines].join("\n").trim();
       }
 
+      function getEditableTranscript() {
+        return els.transcriptText.value.trim();
+      }
+
       function renderTranscript(showCard = false) {
-        const text = getCombinedTranscript();
-        els.transcriptText.value = text;
+        const generatedText = getCombinedTranscript();
+        if (!transcriptManuallyEdited) els.transcriptText.value = generatedText;
+        const text = getEditableTranscript();
+        els.transcriptPreview.textContent = text || "Chưa có nội dung xem trước.";
         els.downloadTranscriptBtn.disabled = !text;
         els.clearTranscriptBtn.disabled = !text;
         if (showCard || text) els.transcriptCard.classList.remove("hidden");
+      }
+
+      function handleTranscriptInput() {
+        transcriptManuallyEdited = true;
+        const text = getEditableTranscript();
+        els.transcriptPreview.textContent = text || "Chưa có nội dung xem trước.";
+        els.downloadTranscriptBtn.disabled = !text;
+        els.clearTranscriptBtn.disabled = !text;
+        els.transcriptStatus.textContent = text
+          ? "Nội dung đã chỉnh sửa. Bản xem trước và file TXT sẽ dùng đúng nội dung này."
+          : "Nội dung đang trống.";
       }
 
       function clearTranscript() {
@@ -1090,7 +1118,9 @@
         }
         transcriptSegments = [];
         transcriptInterim = { mic: "", browser: "" };
+        transcriptManuallyEdited = false;
         els.transcriptText.value = "";
+        els.transcriptPreview.textContent = "Chưa có nội dung xem trước.";
         els.transcriptStatus.textContent = "";
         els.transcriptCard.classList.add("hidden");
         els.downloadTranscriptBtn.disabled = true;
@@ -1268,9 +1298,9 @@
       }
 
       function showTranscriptResult() {
-        const text = getCombinedTranscript();
         els.transcriptCard.classList.remove("hidden");
         renderTranscript();
+        const text = getEditableTranscript();
 
         if (!transcriptSupported && !browserTranscriptSupported) {
           els.transcriptMeta.textContent = "Trình duyệt không hỗ trợ Speech Recognition. Hãy dùng Chrome hoặc Edge bản mới để tạo văn bản tự động.";
@@ -1291,7 +1321,7 @@
       }
 
       function downloadTranscript() {
-        const text = getCombinedTranscript();
+        const text = getEditableTranscript();
         if (!text) return;
         if (transcriptDownloadUrl) URL.revokeObjectURL(transcriptDownloadUrl);
         transcriptDownloadUrl = URL.createObjectURL(new Blob(["\\ufeff", text + "\\n"], { type: "text/plain;charset=utf-8" }));
@@ -2187,6 +2217,7 @@
       els.deleteResultBtn.addEventListener("click", deleteCurrentRecording);
       els.downloadTranscriptBtn.addEventListener("click", downloadTranscript);
       els.clearTranscriptBtn.addEventListener("click", clearTranscript);
+      els.transcriptText.addEventListener("input", handleTranscriptInput);
       els.thresholdInput.addEventListener("input", (event) => {
         speechThreshold = Number(event.target.value);
         els.thresholdValue.textContent = speechThreshold.toFixed(3);
@@ -2238,5 +2269,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49be6e5fc9eabcb',t:'MTc5MTg2ODg5OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49bf52e38f4037d',t:'MTc5MTg2OTQ4Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

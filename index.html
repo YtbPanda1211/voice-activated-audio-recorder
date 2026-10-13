@@ -908,6 +908,7 @@
       let transcriptSupported = false;
       let browserTranscriptSupported = false;
       let transcriptRunning = false;
+      let transcriptStartPending = false;
       let browserTranscriptRunning = false;
       let transcriptStopRequested = false;
       let browserTranscriptStopRequested = false;
@@ -1144,8 +1145,12 @@
         recognition.maxAlternatives = 1;
 
         recognition.onstart = () => {
-          if (source === "mic") transcriptRunning = true;
-          else browserTranscriptRunning = true;
+          if (source === "mic") {
+            transcriptRunning = true;
+            transcriptStartPending = false;
+          } else {
+            browserTranscriptRunning = true;
+          }
           els.transcriptStatus.textContent = `Đang nhận dạng tiếng nói từ ${sourceLabel(source)}…`;
         };
 
@@ -1163,6 +1168,7 @@
         };
 
         recognition.onerror = (event) => {
+          if (source === "mic") transcriptStartPending = false;
           if (["aborted", "no-speech"].includes(event.error)) return;
           const isMic = source === "mic";
           if (["not-allowed", "service-not-allowed"].includes(event.error)) {
@@ -1182,13 +1188,15 @@
         recognition.onend = () => {
           if (source === "mic") {
             transcriptRunning = false;
+            transcriptStartPending = false;
             transcriptInterim.mic = "";
           } else {
             browserTranscriptRunning = false;
             transcriptInterim.browser = "";
           }
           renderTranscript();
-          if (!isMonitoring) {
+          const sessionActive = isMonitoring || isStartingSession;
+          if (!sessionActive) {
             if (transcriptStopRequested || browserTranscriptStopRequested) showTranscriptResult();
             return;
           }
@@ -1221,26 +1229,37 @@
         return Boolean(transcriptRecognition);
       }
 
-      function startSpeechRecognition() {
-        if (!isMonitoring || els.systemOnlyToggle.checked) return;
+      function startSpeechRecognition(options = {}) {
+        const allowBeforeRecording = options.allowBeforeRecording === true;
+        const forceDefaultMicrophone = options.forceDefaultMicrophone === true;
+        if ((!isMonitoring && !isStartingSession && !allowBeforeRecording) || els.systemOnlyToggle.checked) return;
         if (!initializeSpeechRecognition()) {
           setNotice("Trình duyệt không hỗ trợ nhận dạng giọng nói. Hãy dùng Chrome hoặc Edge bản mới để tạo văn bản.", "error");
           return;
         }
+        if (transcriptRunning || transcriptStartPending) return;
 
-        const micTrack = stream?.getAudioTracks().find((track) => track.readyState === "live");
+        const micTrack = forceDefaultMicrophone
+          ? null
+          : stream?.getAudioTracks().find((track) => track.readyState === "live");
         transcriptStopRequested = false;
+        transcriptStartPending = true;
+        els.transcriptCard.classList.remove("hidden");
+        els.transcriptStatus.textContent = "Đang khởi động nhận dạng giọng nói từ Mic…";
         try {
-          // Truyền thẳng track micro đã được cấp quyền để không phụ thuộc vào micro mặc định của trình duyệt.
+          // Bắt đầu sớm bằng micro mặc định nếu đang ở click đầu phiên; sau đó vẫn dùng cùng phiên nhận dạng.
           if (micTrack) transcriptRecognition.start(micTrack);
           else transcriptRecognition.start();
         } catch (error) {
+          transcriptStartPending = false;
           // Một số trình duyệt chưa hỗ trợ start(track); thử lại bằng micro mặc định.
           if ((error?.name === "TypeError" || error?.name === "NotSupportedError") && micTrack) {
             try {
+              transcriptStartPending = true;
               transcriptRecognition.start();
               return;
             } catch (fallbackError) {
+              transcriptStartPending = false;
               error = fallbackError;
             }
           }
@@ -1274,11 +1293,15 @@
 
       function stopMicSpeechRecognition() {
         transcriptStopRequested = true;
-        if (!transcriptRecognition || !transcriptRunning) return;
+        if (!transcriptRecognition || (!transcriptRunning && !transcriptStartPending)) return;
         try {
           transcriptRecognition.stop();
         } catch (error) {
-          // Recognition có thể đã tự kết thúc.
+          try {
+            transcriptRecognition.abort();
+          } catch (abortError) {
+            // Recognition có thể đã tự kết thúc.
+          }
         }
       }
 
@@ -2269,5 +2292,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49bf52e38f4037d',t:'MTc5MTg2OTQ4Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49c3460db71a29d',t:'MTc5MTg3MjA3MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

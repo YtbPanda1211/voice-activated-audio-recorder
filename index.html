@@ -1138,7 +1138,9 @@
           if (["not-allowed", "service-not-allowed"].includes(event.error)) {
             if (isMic) transcriptStopRequested = true;
             else browserTranscriptStopRequested = true;
-            els.transcriptStatus.textContent = `Trình duyệt chưa cho phép nhận dạng từ ${sourceLabel(source)}.`;
+            const permissionMessage = `Trình duyệt chưa cho phép nhận dạng từ ${sourceLabel(source)}.`;
+            els.transcriptStatus.textContent = permissionMessage;
+            if (isMic) setNotice(permissionMessage, "error");
           } else if (event.error === "audio-capture" && source === "browser") {
             browserTranscriptSupported = false;
             els.transcriptStatus.textContent = "Trình duyệt không cho phép đưa audio track trình duyệt vào Speech Recognition.";
@@ -1191,15 +1193,31 @@
 
       function startSpeechRecognition() {
         if (!isMonitoring || els.systemOnlyToggle.checked) return;
-        if (!initializeSpeechRecognition()) return;
+        if (!initializeSpeechRecognition()) {
+          setNotice("Trình duyệt không hỗ trợ nhận dạng giọng nói. Hãy dùng Chrome hoặc Edge bản mới để tạo văn bản.", "error");
+          return;
+        }
 
+        const micTrack = stream?.getAudioTracks().find((track) => track.readyState === "live");
         transcriptStopRequested = false;
         try {
-          // Không truyền track để dùng micro.
-          transcriptRecognition.start();
+          // Truyền thẳng track micro đã được cấp quyền để không phụ thuộc vào micro mặc định của trình duyệt.
+          if (micTrack) transcriptRecognition.start(micTrack);
+          else transcriptRecognition.start();
         } catch (error) {
+          // Một số trình duyệt chưa hỗ trợ start(track); thử lại bằng micro mặc định.
+          if ((error?.name === "TypeError" || error?.name === "NotSupportedError") && micTrack) {
+            try {
+              transcriptRecognition.start();
+              return;
+            } catch (fallbackError) {
+              error = fallbackError;
+            }
+          }
           if (error?.name !== "InvalidStateError") {
-            els.transcriptStatus.textContent = `Không thể bắt đầu nhận dạng Mic: ${error.message || "lỗi không xác định"}.`;
+            const message = `Không thể bắt đầu nhận dạng Mic: ${error.message || "lỗi không xác định"}.`;
+            els.transcriptStatus.textContent = message;
+            setNotice(message, "error");
           }
         }
       }
@@ -2220,5 +2238,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49bdb3758cdddc9',t:'MTc5MTg2ODQxOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49be6e5fc9eabcb',t:'MTc5MTg2ODg5OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

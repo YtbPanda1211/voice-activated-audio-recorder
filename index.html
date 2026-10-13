@@ -1086,11 +1086,20 @@
       function normalizeRecognizedText(text) {
         return String(text || "")
           .normalize("NFC")
-          .replace(/[\\t\\r\\n]+/g, " ")
-          .replace(/\\s+/g, " ")
-          .replace(/\\s+([,.!?;:])/g, "$1")
-          .replace(/([,.!?;:])(?=\\S)/g, "$1 ")
+          .replace(/[\t\r\n]+/g, " ")
+          .replace(/\s+/g, " ")
+          .replace(/\s+([,.!?;:])/g, "$1")
+          .replace(/([,!?;:])(?=\S)/g, "$1 ")
           .trim();
+      }
+
+      function splitRecognizedSentences(text) {
+        const cleanText = normalizeRecognizedText(text);
+        if (!cleanText) return [];
+        // Giữ nguyên dấu câu ở cuối từng câu; các câu cùng một kết quả vẫn được tách thành từng dòng.
+        return cleanText.match(/[^.!?。！？]+[.!?。！？]+|[^.!?。！？]+$/g)
+          ?.map((part) => part.trim())
+          .filter(Boolean) || [];
       }
 
       function getCombinedTranscript() {
@@ -1158,12 +1167,30 @@
         els.clearTranscriptBtn.disabled = true;
       }
 
-      function appendTranscriptFinal(source, text, time = performance.now()) {
+      function splitRecognizedSentences(text) {
         const cleanText = normalizeRecognizedText(text);
-        if (!cleanText) return;
-        transcriptSegments.push({ source, text: cleanText, time, sequence: transcriptSequence });
-        transcriptSequence += 1;
+        if (!cleanText) return [];
+        // Giữ nguyên dấu câu ở cuối từng câu; các câu cùng một kết quả vẫn được tách thành từng dòng.
+        return cleanText.match(/[^.!?。！？]+[.!?。！？]+|[^.!?。！？]+$/g)
+          ?.map((part) => part.trim())
+          .filter(Boolean) || [];
+      }
+
+      function appendTranscriptFinal(source, text, time = performance.now()) {
+        const sentences = splitRecognizedSentences(text);
+        sentences.forEach((sentence) => {
+          transcriptSegments.push({ source, text: sentence, time, sequence: transcriptSequence });
+          transcriptSequence += 1;
+        });
         transcriptSegments.sort((a, b) => a.time - b.time || a.sequence - b.sequence);
+      }
+
+      function commitInterimTranscript(source, time = performance.now()) {
+        const text = transcriptInterim[source];
+        if (!text) return;
+        appendTranscriptFinal(source, text, time);
+        transcriptInterim[source] = "";
+        transcriptInterimTime[source] = 0;
       }
 
       function createSpeechRecognition(source) {
@@ -1226,6 +1253,9 @@
         };
 
         recognition.onend = () => {
+          // Nếu trình duyệt kết thúc lượt nhận dạng khi phần cuối vẫn còn là interim,
+          // giữ phần đó thay vì làm mất từ cuối câu.
+          commitInterimTranscript(source);
           if (source === "mic") {
             transcriptRunning = false;
             transcriptStartPending = false;
@@ -1389,7 +1419,7 @@
         const text = getEditableTranscript();
         if (!text) return;
         if (transcriptDownloadUrl) URL.revokeObjectURL(transcriptDownloadUrl);
-        transcriptDownloadUrl = URL.createObjectURL(new Blob(["\\ufeff", text + "\\n"], { type: "text/plain;charset=utf-8" }));
+        transcriptDownloadUrl = URL.createObjectURL(new Blob(["\ufeff", text + "\n"], { type: "text/plain;charset=utf-8" }));
         const link = document.createElement("a");
         link.href = transcriptDownloadUrl;
         link.download = `van-ban-ghi-am-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")}.txt`;
@@ -2230,6 +2260,8 @@
       function stopSession(discard = false) {
         if (!isMonitoring) return;
 
+        // Cho Speech Recognition cơ hội trả nốt kết quả cuối trước khi đóng phiên ghi âm.
+        stopSpeechRecognition();
         discardOnStop = discard;
         if (mediaRecorder && mediaRecorder.state !== "inactive") {
           commitActiveDuration();
@@ -2337,5 +2369,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49c6193aee7a29d',t:'MTc5MTg3MzkyMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49c6ed56d9a851b',t:'MTc5MTg3NDQ2Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

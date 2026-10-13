@@ -538,6 +538,24 @@
     .result-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
     .download-link { text-decoration: none; }
 
+    .transcript-textarea {
+      display: block;
+      width: 100%;
+      min-height: 180px;
+      padding: 14px 15px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      color: var(--ink);
+      background: #fbfcff;
+      font: inherit;
+      line-height: 1.65;
+      resize: vertical;
+    }
+
+    .transcript-textarea:focus { outline: 3px solid rgba(91, 92, 226, 0.18); outline-offset: 2px; }
+    .transcript-status { min-height: 22px; margin: 12px 0 0; color: var(--muted); font-size: 0.82rem; line-height: 1.5; }
+    html[data-theme="dark"] .transcript-textarea { border-color: var(--line); color: var(--ink); background: #111929; }
+
     .tips {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -750,6 +768,32 @@
       </div>
     </section>
 
+    <section id="transcriptCard" class="panel result-card hidden" aria-labelledby="transcript-title">
+      <div class="result-header">
+        <div>
+          <h2 id="transcript-title">Văn bản từ giọng nói</h2>
+          <p id="transcriptMeta">Bản chép lời được tạo trong lúc ghi âm bằng Speech Recognition của trình duyệt.</p>
+        </div>
+      </div>
+      <label class="sr-only" for="transcriptText">Nội dung văn bản từ bản ghi</label>
+      <textarea id="transcriptText" class="transcript-textarea" readonly placeholder="Chưa nhận được văn bản."></textarea>
+      <p id="transcriptStatus" class="transcript-status" role="status"></p>
+      <div class="result-actions">
+        <button id="downloadTranscriptBtn" class="button button-primary" type="button" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12M7 10l5 5 5-5M5 21h14"></path>
+          </svg>
+          Tải văn bản .txt
+        </button>
+        <button id="clearTranscriptBtn" class="button button-danger" type="button" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path>
+          </svg>
+          Xóa văn bản
+        </button>
+      </div>
+    </section>
+
     <section class="tips" aria-label="Hướng dẫn sử dụng">
       <div class="tip">
         <span class="tip-number">1</span>
@@ -763,12 +807,12 @@
       </div>
       <div class="tip">
         <span class="tip-number">3</span>
-        <strong>Nghe, tải hoặc xóa</strong>
-        <span>Bản ghi chỉ nằm trong bộ nhớ tạm cho đến khi bạn tải xuống.</span>
+        <strong>Nghe, tải audio hoặc TXT</strong>
+        <span>Bạn có thể tải cả bản ghi âm và văn bản chép lời xuống máy.</span>
       </div>
     </section>
 
-    <p class="footer-note">Credit: Trang web này được tạo bởi <strong>SEONG</strong> hoặc <strong>Rice Field</strong>. Trang web được tạo với ý tưởng chơi chơi ngẫu hứng.</p>
+    <p class="footer-note">Mẹo: nên chạy trang bằng <strong>localhost</strong> hoặc <strong>HTTPS</strong> để quyền micro hoạt động ổn định. Âm thanh không được gửi lên máy chủ.</p>
   </main>
 
   <script>
@@ -805,6 +849,12 @@
         resultMeta: document.getElementById("resultMeta"),
         audioPreview: document.getElementById("audioPreview"),
         downloadBtn: document.getElementById("downloadBtn"),
+        transcriptCard: document.getElementById("transcriptCard"),
+        transcriptMeta: document.getElementById("transcriptMeta"),
+        transcriptText: document.getElementById("transcriptText"),
+        transcriptStatus: document.getElementById("transcriptStatus"),
+        downloadTranscriptBtn: document.getElementById("downloadTranscriptBtn"),
+        clearTranscriptBtn: document.getElementById("clearTranscriptBtn"),
         systemAudioToggle: document.getElementById("systemAudioToggle"),
         systemOnlyToggle: document.getElementById("systemOnlyToggle"),
         themeToggle: document.getElementById("themeToggle"),
@@ -837,6 +887,14 @@
       let discardOnStop = false;
       let recordingBlob = null;
       let recordingUrl = "";
+      let transcriptRecognition = null;
+      let transcriptSupported = false;
+      let transcriptRunning = false;
+      let transcriptStopRequested = false;
+      let transcriptFinalText = "";
+      let transcriptInterimText = "";
+      let transcriptDownloadUrl = "";
+      let recordingUsedSystemOnly = false;
       let lastStatus = "";
       let lastStateTitle = "";
       let lastStateDetail = "";
@@ -977,6 +1035,7 @@
         els.audioPreview.load();
         els.downloadBtn.removeAttribute("href");
         els.resultCard.classList.add("hidden");
+        clearTranscript();
         updateButtons();
       }
 
@@ -992,6 +1051,167 @@
         els.downloadBtn.download = `ghi-am-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")}.${extension}`;
         els.resultCard.classList.remove("hidden");
         updateButtons();
+      }
+
+      function getCombinedTranscript() {
+        return [transcriptFinalText, transcriptInterimText]
+          .filter(Boolean)
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+
+      function renderTranscript(showCard = false) {
+        const text = getCombinedTranscript();
+        els.transcriptText.value = text;
+        els.downloadTranscriptBtn.disabled = !text;
+        els.clearTranscriptBtn.disabled = !text;
+        if (showCard || text) els.transcriptCard.classList.remove("hidden");
+      }
+
+      function clearTranscript() {
+        if (transcriptDownloadUrl) {
+          URL.revokeObjectURL(transcriptDownloadUrl);
+          transcriptDownloadUrl = "";
+        }
+        transcriptFinalText = "";
+        transcriptInterimText = "";
+        els.transcriptText.value = "";
+        els.transcriptStatus.textContent = "";
+        els.transcriptCard.classList.add("hidden");
+        els.downloadTranscriptBtn.disabled = true;
+        els.clearTranscriptBtn.disabled = true;
+      }
+
+      function appendTranscriptFinal(text) {
+        const cleanText = text.trim();
+        if (!cleanText) return;
+        transcriptFinalText = transcriptFinalText
+          ? `${transcriptFinalText} ${cleanText}`
+          : cleanText;
+      }
+
+      function initializeSpeechRecognition() {
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!Recognition) {
+          transcriptSupported = false;
+          els.transcriptMeta.textContent = "Trình duyệt này không hỗ trợ nhận dạng giọng nói trực tiếp.";
+          return false;
+        }
+        if (transcriptRecognition) return true;
+
+        transcriptSupported = true;
+        transcriptRecognition = new Recognition();
+        transcriptRecognition.lang = "vi-VN";
+        transcriptRecognition.continuous = true;
+        transcriptRecognition.interimResults = true;
+        transcriptRecognition.maxAlternatives = 1;
+
+        transcriptRecognition.onstart = () => {
+          transcriptRunning = true;
+          els.transcriptStatus.textContent = "Đang nhận dạng giọng nói tiếng Việt…";
+        };
+
+        transcriptRecognition.onresult = (event) => {
+          let interimText = "";
+          for (let index = event.resultIndex; index < event.results.length; index += 1) {
+            const result = event.results[index];
+            const text = result[0]?.transcript || "";
+            if (result.isFinal) appendTranscriptFinal(text);
+            else interimText += text;
+          }
+          transcriptInterimText = interimText.trim();
+          renderTranscript(true);
+          els.transcriptStatus.textContent = "Đang nhận dạng giọng nói tiếng Việt…";
+        };
+
+        transcriptRecognition.onerror = (event) => {
+          if (["aborted", "no-speech"].includes(event.error)) return;
+          if (["not-allowed", "service-not-allowed"].includes(event.error)) {
+            transcriptStopRequested = true;
+            els.transcriptStatus.textContent = "Trình duyệt chưa cho phép nhận dạng giọng nói.";
+          } else {
+            els.transcriptStatus.textContent = `Không thể nhận dạng giọng nói: ${event.error || "lỗi không xác định"}.`;
+          }
+        };
+
+        transcriptRecognition.onend = () => {
+          transcriptRunning = false;
+          renderTranscript();
+          if (!isMonitoring && transcriptStopRequested) showTranscriptResult();
+          if (isMonitoring && !transcriptStopRequested && !els.systemOnlyToggle.checked) {
+            window.setTimeout(() => {
+              if (isMonitoring && !transcriptStopRequested && !els.systemOnlyToggle.checked) startSpeechRecognition();
+            }, 250);
+          }
+        };
+        return true;
+      }
+
+      function startSpeechRecognition() {
+        if (!isMonitoring || els.systemOnlyToggle.checked) return;
+        if (!initializeSpeechRecognition()) return;
+
+        transcriptStopRequested = false;
+        try {
+          transcriptRecognition.start();
+        } catch (error) {
+          if (error?.name !== "InvalidStateError") {
+            els.transcriptStatus.textContent = `Không thể bắt đầu nhận dạng: ${error.message || "lỗi không xác định"}.`;
+          }
+        }
+      }
+
+      function stopSpeechRecognition() {
+        transcriptStopRequested = true;
+        if (!transcriptRecognition || !transcriptRunning) return;
+        try {
+          transcriptRecognition.stop();
+        } catch (error) {
+          // Recognition có thể đã tự kết thúc.
+        }
+      }
+
+      function showTranscriptResult() {
+        const text = getCombinedTranscript();
+        els.transcriptCard.classList.remove("hidden");
+        renderTranscript();
+
+        if (recordingUsedSystemOnly) {
+          els.transcriptMeta.textContent = "Chế độ chỉ ghi trình duyệt/thiết bị không dùng micro. Speech Recognition của trình duyệt không nhận trực tiếp audio track hệ thống.";
+          els.transcriptStatus.textContent = text
+            ? "Đã có văn bản từ phần ghi nhận trước khi chuyển sang chế độ chỉ thiết bị."
+            : "Không thể tự chép lời audio hệ thống bằng Web Speech API thuần trình duyệt.";
+        } else if (!transcriptSupported) {
+          els.transcriptMeta.textContent = "Trình duyệt không hỗ trợ Speech Recognition. Hãy dùng Chrome hoặc Edge để tạo văn bản tự động.";
+          els.transcriptStatus.textContent = "Không có văn bản tự động. Bản ghi âm vẫn có thể tải xuống.";
+        } else if (text) {
+          els.transcriptMeta.textContent = "Văn bản được nhận dạng trực tiếp trong lúc ghi âm, ngôn ngữ: Tiếng Việt.";
+          els.transcriptStatus.textContent = "Bạn có thể chỉnh sửa nội dung sau khi tải file TXT về máy.";
+        } else {
+          els.transcriptMeta.textContent = "Chưa nhận được câu nói rõ ràng trong phiên ghi âm.";
+          els.transcriptStatus.textContent = "Hãy nói gần micro hơn hoặc dùng Chrome/Edge rồi thử lại.";
+        }
+        renderTranscript(true);
+      }
+
+      function downloadTranscript() {
+        const text = getCombinedTranscript();
+        if (!text) return;
+        if (transcriptDownloadUrl) URL.revokeObjectURL(transcriptDownloadUrl);
+        transcriptDownloadUrl = URL.createObjectURL(new Blob(["\\ufeff", text + "\\n"], { type: "text/plain;charset=utf-8" }));
+        const link = document.createElement("a");
+        link.href = transcriptDownloadUrl;
+        link.download = `van-ban-ghi-am-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")}.txt`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => {
+          if (transcriptDownloadUrl === link.href) {
+            URL.revokeObjectURL(transcriptDownloadUrl);
+            transcriptDownloadUrl = "";
+          }
+        }, 1000);
       }
 
       function stopStreamTracks(mediaStream) {
@@ -1141,8 +1361,10 @@
         if (wasSystemOnly) {
           els.systemOnlyToggle.checked = false;
           if (stream && microphoneSource) {
+            recordingUsedSystemOnly = false;
             connectDetectionSource(microphoneSource);
             connectMicrophoneToRecording();
+            startSpeechRecognition();
           } else if (isMonitoring && mediaRecorder?.state !== "inactive") {
             updateButtons();
             setNotice("Đã dừng chia sẻ âm thanh trình duyệt/thiết bị. Phiên ghi sẽ kết thúc vì chưa có micro dự phòng.", "error");
@@ -1239,7 +1461,9 @@
           els.systemAudioToggle.checked = false;
           if (requestedSystemOnly) {
             els.systemOnlyToggle.checked = false;
+            recordingUsedSystemOnly = false;
             connectMicrophoneToRecording();
+            startSpeechRecognition();
           }
           setNotice(systemAudioErrorMessage(error), "error");
         } finally {
@@ -1269,9 +1493,11 @@
         if (enabled) {
           systemAudioChoiceBeforeOnly = els.systemAudioToggle.checked;
           els.systemAudioToggle.checked = true;
+          stopSpeechRecognition();
           updateButtons();
           if (!systemStream) await enableSystemAudio();
           if (els.systemOnlyToggle.checked && systemStream) {
+            recordingUsedSystemOnly = true;
             disconnectMicrophoneFromRecording();
             connectDetectionSource(systemGainNode || systemSource);
             startSystemOnlyRecording();
@@ -1293,9 +1519,11 @@
         }
 
         els.systemOnlyToggle.checked = false;
+        recordingUsedSystemOnly = false;
         disconnectDetectionSource(systemGainNode || systemSource);
         connectDetectionSource(microphoneSource);
         connectMicrophoneToRecording();
+        startSpeechRecognition();
 
         if (restoreSystemAudio) {
           els.systemAudioToggle.checked = true;
@@ -1317,6 +1545,7 @@
           animationId = null;
         }
 
+        stopSpeechRecognition();
         const currentAudioContext = audioContext;
         const currentDetectionSource = detectionSource;
         const currentMicrophoneSource = microphoneSource;
@@ -1425,6 +1654,7 @@
         } else {
           resetToReady("Chưa phát hiện tiếng nói nên chưa tạo bản ghi.", "Hãy nói gần micro hơn rồi thử lại.");
         }
+        showTranscriptResult();
       }
 
       function startSystemOnlyRecording() {
@@ -1587,6 +1817,9 @@
         }
 
         const systemOnlyMode = els.systemOnlyToggle.checked;
+        clearTranscript();
+        recordingUsedSystemOnly = systemOnlyMode;
+
         if (!navigator.mediaDevices || (!systemOnlyMode && typeof navigator.mediaDevices.getUserMedia !== "function")) {
           setStatus("error", "Trình duyệt không hỗ trợ", systemOnlyMode
             ? "Không tìm thấy API chia sẻ âm thanh trình duyệt/thiết bị trên trình duyệt này."
@@ -1668,6 +1901,7 @@
           if (systemOnlyMode) {
             startSystemOnlyRecording();
           } else {
+            startSpeechRecognition();
             const sourceText = systemStream
               ? "Micro và âm thanh trình duyệt/thiết bị đã sẵn sàng. Hãy nói để bắt đầu ghi âm."
               : "Micro đã sẵn sàng. Hãy nói để bắt đầu ghi âm.";
@@ -1752,6 +1986,8 @@
       els.stopBtn.addEventListener("click", () => stopSession(false));
       els.deleteBtn.addEventListener("click", deleteCurrentRecording);
       els.deleteResultBtn.addEventListener("click", deleteCurrentRecording);
+      els.downloadTranscriptBtn.addEventListener("click", downloadTranscript);
+      els.clearTranscriptBtn.addEventListener("click", clearTranscript);
       els.thresholdInput.addEventListener("input", (event) => {
         speechThreshold = Number(event.target.value);
         els.thresholdValue.textContent = speechThreshold.toFixed(3);
@@ -1787,5 +2023,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d1be67a87809cc',t:'MTc4OTc0OTExNg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>

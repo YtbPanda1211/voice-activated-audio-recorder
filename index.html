@@ -812,7 +812,7 @@
       </div>
     </section>
 
-    <p class="footer-note">Mẹo: nên chạy trang bằng <strong>localhost</strong> hoặc <strong>HTTPS</strong> để quyền micro hoạt động ổn định. Âm thanh không được gửi lên máy chủ.</p>
+    <p class="footer-note">Mẹo: nên chạy trang bằng <strong>localhost</strong> hoặc <strong>HTTPS</strong> để quyền micro hoạt động ổn định. Khi ghi ngầm, bạn có thể chuyển tab nhưng không được đóng tab hoặc để hệ điều hành dừng trình duyệt. Âm thanh không được gửi lên máy chủ.</p>
   </main>
 
   <script>
@@ -873,6 +873,8 @@
       let recordingDestination = null;
       let mediaRecorder = null;
       let animationId = null;
+      let monitorTimer = null;
+      let wakeLock = null;
       let audioData = null;
       let smoothedRms = 0;
       let speechState = false;
@@ -1540,11 +1542,8 @@
       }
 
       function cleanupAudioSession() {
-        if (animationId !== null) {
-          cancelAnimationFrame(animationId);
-          animationId = null;
-        }
-
+        stopMonitoringLoop();
+        releaseWakeLock();
         stopSpeechRecognition();
         const currentAudioContext = audioContext;
         const currentDetectionSource = detectionSource;
@@ -1757,8 +1756,8 @@
         }
       }
 
-      function drawWaveform() {
-        if (!analyser || !audioData) return;
+      function drawWaveformFrame() {
+        if (!isMonitoring || !analyser || !audioData) return;
 
         analyser.getByteTimeDomainData(audioData);
         let sum = 0;
@@ -1802,9 +1801,63 @@
           x += sliceWidth;
         }
         canvasContext.stroke();
-
         updateTimer();
-        animationId = requestAnimationFrame(drawWaveform);
+      }
+
+      function stopMonitoringLoop() {
+        if (animationId !== null) {
+          cancelAnimationFrame(animationId);
+          animationId = null;
+        }
+        if (monitorTimer !== null) {
+          clearInterval(monitorTimer);
+          monitorTimer = null;
+        }
+      }
+
+      function startMonitoringLoop() {
+        stopMonitoringLoop();
+        if (!isMonitoring) return;
+        drawWaveformFrame();
+        if (document.hidden) {
+          // requestAnimationFrame bị dừng/throttle khi tab ẩn; timer giúp bộ tạm dừng vẫn được cập nhật.
+          monitorTimer = window.setInterval(drawWaveformFrame, 250);
+        } else {
+          animationId = requestAnimationFrame(drawWaveform);
+        }
+      }
+
+      function drawWaveform() {
+        drawWaveformFrame();
+        if (isMonitoring && !document.hidden) animationId = requestAnimationFrame(drawWaveform);
+      }
+
+      async function requestWakeLock() {
+        if (!isMonitoring || !navigator.wakeLock || wakeLock) return;
+        try {
+          const requestedLock = await navigator.wakeLock.request("screen");
+          if (!isMonitoring) {
+            await requestedLock.release();
+            return;
+          }
+          wakeLock = requestedLock;
+          wakeLock.addEventListener("release", () => {
+            if (wakeLock === requestedLock) wakeLock = null;
+          });
+        } catch (error) {
+          // Wake Lock không được hỗ trợ hoặc bị trình duyệt từ chối; MediaRecorder vẫn tiếp tục nếu tab còn sống.
+        }
+      }
+
+      async function releaseWakeLock() {
+        const currentWakeLock = wakeLock;
+        wakeLock = null;
+        if (!currentWakeLock) return;
+        try {
+          await currentWakeLock.release();
+        } catch (error) {
+          // Wake Lock có thể đã được trình duyệt tự giải phóng.
+        }
       }
 
       async function startSession() {
@@ -1911,7 +1964,8 @@
               : "Đang nghe micro. Bản ghi chỉ bắt đầu khi phát hiện tiếng nói.");
           }
           updateButtons();
-          animationId = requestAnimationFrame(drawWaveform);
+          startMonitoringLoop();
+          requestWakeLock();
         } catch (error) {
           if (systemAudioPromptActive) {
             els.systemAudioToggle.checked = false;
@@ -2015,6 +2069,22 @@
       });
       els.systemOnlyToggle.addEventListener("change", handleSystemOnlyToggle);
       els.themeToggle.addEventListener("click", toggleTheme);
+      document.addEventListener("visibilitychange", () => {
+        if (!isMonitoring) return;
+        startMonitoringLoop();
+        if (audioContext?.state === "suspended") audioContext.resume().catch(() => {});
+        if (document.hidden) {
+          setNotice("Đang ghi âm ngầm. Bạn có thể chuyển sang ứng dụng/tab khác, nhưng không được đóng tab này.");
+        } else {
+          requestWakeLock();
+          setNotice("Đã quay lại ứng dụng; phiên ghi âm vẫn đang tiếp tục.", "success");
+        }
+      });
+      window.addEventListener("beforeunload", (event) => {
+        if (!isMonitoring) return;
+        event.preventDefault();
+        event.returnValue = "Phiên ghi âm đang chạy. Bạn có chắc muốn rời trang không?";
+      });
       window.addEventListener("resize", initializeCanvas);
 
       applyTheme(getInitialTheme());
@@ -2023,5 +2093,5 @@
       updateButtons();
     })();
   </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49b6757e853dd8b',t:'MTc5MTg2MzY3Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

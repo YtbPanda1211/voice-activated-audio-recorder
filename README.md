@@ -79,6 +79,8 @@ tải xuống 📥 hoặc xóa vĩnh viễn ngay lập tức chỉ với một c
 * 3.13 ⚠️ Tắt giữa chừng $\rightarrow$ trang bật lại yêu cầu quyền mic để trả về chế độ 1 hoặc 2.
 ---
 ---
+---
+---
 ### 14/10/2026 :
 
 🚀 NHẬT KÝ CẬP NHẬT & HƯỚNG DẪN SỬ DỤNG HỆ THỐNG GHI ÂM

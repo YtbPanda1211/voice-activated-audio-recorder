@@ -1269,6 +1269,7 @@
       }
 
       function renderTranscript(showCard = false) {
+        deduplicateTranscriptSegments();
         const generatedText = getCombinedTranscript();
         if (!transcriptManuallyEdited) els.transcriptText.value = generatedText;
         const text = getEditableTranscript();
@@ -1334,7 +1335,7 @@
         for (let index = transcriptSegments.length - 1; index >= 0; index -= 1) {
           const segment = transcriptSegments[index];
           if (segment.source !== source || !segment.provisional) continue;
-          if (Math.abs(time - segment.time) > 5000) continue;
+          if (Math.abs(time - segment.time) > 15000) continue;
           const previous = comparableTranscriptText(segment.text);
           if (!previous) continue;
           if (candidate === previous || candidate.includes(previous) || previous.includes(candidate)) {
@@ -1356,13 +1357,35 @@
               .reverse()
               .find((segment) => segment.source === source && !segment.provisional);
             if (recentDuplicate
-              && Math.abs(time - recentDuplicate.time) < 2000
-              && comparable === comparableTranscriptText(recentDuplicate.text)) return;
+              && comparable === comparableTranscriptText(recentDuplicate.text)
+              && (Math.abs(time - recentDuplicate.time) < 15000
+                || transcriptSegments[transcriptSegments.length - 1] === recentDuplicate)) return;
           }
           transcriptSegments.push({ source, text: sentence, time, provisional, sequence: transcriptSequence });
           transcriptSequence += 1;
         });
         transcriptSegments.sort((a, b) => a.time - b.time || a.sequence - b.sequence);
+      }
+
+      function deduplicateTranscriptSegments() {
+        const ordered = transcriptSegments.slice().sort((a, b) => a.time - b.time || a.sequence - b.sequence);
+        const kept = [];
+        ordered.forEach((segment) => {
+          const comparable = comparableTranscriptText(segment.text);
+          const previous = kept.slice().reverse().find((item) => item.source === segment.source);
+          if (previous
+            && comparable
+            && comparable === comparableTranscriptText(previous.text)
+            && (segment.provisional || previous.provisional || Math.abs(segment.time - previous.time) < 15000)) {
+            if (previous.provisional && !segment.provisional) {
+              const index = kept.indexOf(previous);
+              kept[index] = segment;
+            }
+            return;
+          }
+          kept.push(segment);
+        });
+        transcriptSegments = kept;
       }
 
       function clearTranscriptSilenceTimer(source) {
@@ -2817,5 +2840,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4de411279a804b7',t:'MTc5MjU2NDY1MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4de4812e8eb7161',t:'MTc5MjU2NDkzOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

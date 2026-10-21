@@ -1320,10 +1320,46 @@
           .filter(Boolean) || [];
       }
 
-      function appendTranscriptFinal(source, text, time = performance.now()) {
+      function comparableTranscriptText(text) {
+        return normalizeRecognizedText(text)
+          .toLocaleLowerCase("vi-VN")
+          .replace(/[.,!?;:()[\]{}"“”'`]/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+
+      function removeMatchingProvisionalTranscript(source, sentence, time) {
+        const candidate = comparableTranscriptText(sentence);
+        if (!candidate) return;
+        for (let index = transcriptSegments.length - 1; index >= 0; index -= 1) {
+          const segment = transcriptSegments[index];
+          if (segment.source !== source || !segment.provisional) continue;
+          if (Math.abs(time - segment.time) > 5000) continue;
+          const previous = comparableTranscriptText(segment.text);
+          if (!previous) continue;
+          if (candidate === previous || candidate.includes(previous) || previous.includes(candidate)) {
+            transcriptSegments.splice(index, 1);
+            return;
+          }
+        }
+      }
+
+      function appendTranscriptFinal(source, text, time = performance.now(), options = {}) {
         const sentences = splitRecognizedSentences(text);
         sentences.forEach((sentence) => {
-          transcriptSegments.push({ source, text: sentence, time, sequence: transcriptSequence });
+          const provisional = options.provisional === true;
+          if (!provisional) {
+            removeMatchingProvisionalTranscript(source, sentence, time);
+            const comparable = comparableTranscriptText(sentence);
+            const recentDuplicate = transcriptSegments
+              .slice()
+              .reverse()
+              .find((segment) => segment.source === source && !segment.provisional);
+            if (recentDuplicate
+              && Math.abs(time - recentDuplicate.time) < 2000
+              && comparable === comparableTranscriptText(recentDuplicate.text)) return;
+          }
+          transcriptSegments.push({ source, text: sentence, time, provisional, sequence: transcriptSequence });
           transcriptSequence += 1;
         });
         transcriptSegments.sort((a, b) => a.time - b.time || a.sequence - b.sequence);
@@ -1335,11 +1371,11 @@
         transcriptSilenceTimers[source] = null;
       }
 
-      function commitInterimTranscript(source, time = performance.now()) {
+      function commitInterimTranscript(source, time = performance.now(), options = { provisional: true }) {
         clearTranscriptSilenceTimer(source);
         const text = transcriptInterim[source];
         if (!text) return;
-        appendTranscriptFinal(source, text, time);
+        appendTranscriptFinal(source, text, time, options);
         transcriptInterim[source] = "";
         transcriptInterimTime[source] = 0;
       }
@@ -1443,7 +1479,7 @@
         recognition.onend = () => {
           // Nếu trình duyệt kết thúc lượt nhận dạng khi phần cuối vẫn còn là interim,
           // giữ phần đó thay vì làm mất từ cuối câu.
-          commitInterimTranscript(source);
+          commitInterimTranscript(source, performance.now(), { provisional: false });
           if (source === "mic") {
             transcriptRunning = false;
             transcriptStartPending = false;
@@ -2781,5 +2817,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4de355c6ef484d8',t:'MTc5MjU2NDE3Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4de411279a804b7',t:'MTc5MjU2NDY1MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

@@ -799,6 +799,11 @@
       </div>
       <p id="transcriptStatus" class="transcript-status" role="status"></p>
       <div class="result-actions">
+        <button id="whisperBtn" class="button button-secondary" type="button" disabled>
+          Tăng độ chính xác bằng Whisper cục bộ
+        </button>
+      </div>
+      <div class="result-actions">
         <button id="downloadTranscriptBtn" class="button button-primary" type="button" disabled>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 3v12M7 10l5 5 5-5M5 21h14"></path>
@@ -877,6 +882,7 @@
         transcriptText: document.getElementById("transcriptText"),
         transcriptPreview: document.getElementById("transcriptPreview"),
         transcriptStatus: document.getElementById("transcriptStatus"),
+        whisperBtn: document.getElementById("whisperBtn"),
         downloadTranscriptBtn: document.getElementById("downloadTranscriptBtn"),
         clearTranscriptBtn: document.getElementById("clearTranscriptBtn"),
         systemAudioToggle: document.getElementById("systemAudioToggle"),
@@ -924,6 +930,13 @@
       let discardOnStop = false;
       let recordingBlob = null;
       let recordingUrl = "";
+      let whisperMicRecorder = null;
+      let whisperBrowserRecorder = null;
+      let whisperMicChunks = [];
+      let whisperBrowserChunks = [];
+      let whisperMicBlob = null;
+      let whisperBrowserBlob = null;
+      let whisperRequestInProgress = false;
       let transcriptRecognition = null;
       let browserTranscriptRecognition = null;
       let transcriptSupported = false;
@@ -1074,7 +1087,118 @@
         return "webm";
       }
 
-      function clearRecordingPreview() {
+      function updateWhisperButton() {
+        els.whisperBtn.disabled = whisperRequestInProgress || (!whisperMicBlob && !whisperBrowserBlob);
+        els.whisperBtn.textContent = whisperRequestInProgress
+          ? "Whisper đang xử lý…"
+          : "Tăng độ chính xác bằng Whisper cục bộ";
+      }
+
+      function createWhisperSourceRecorder(mediaStream, source) {
+        if (!mediaStream || !window.MediaRecorder) return null;
+        const mimeType = supportedMimeType();
+        const options = { audioBitsPerSecond: 192000 };
+        if (mimeType) options.mimeType = mimeType;
+        let recorder;
+        try {
+          recorder = new MediaRecorder(mediaStream, options);
+        } catch (error) {
+          recorder = new MediaRecorder(mediaStream);
+        }
+        const isMic = source === "mic";
+        const chunksForSource = isMic ? whisperMicChunks : whisperBrowserChunks;
+        recorder.addEventListener("dataavailable", (event) => {
+          if (event.data && event.data.size > 0) chunksForSource.push(event.data);
+        });
+        recorder.addEventListener("stop", () => {
+          const blob = chunksForSource.length
+            ? new Blob(chunksForSource, { type: recorder.mimeType || mimeType || "audio/webm" })
+            : null;
+          if (isMic) {
+            whisperMicBlob = blob;
+            whisperMicRecorder = null;
+          } else {
+            whisperBrowserBlob = blob;
+            whisperBrowserRecorder = null;
+          }
+          updateWhisperButton();
+        });
+        recorder.addEventListener("error", () => {
+          if (isMic) whisperMicRecorder = null;
+          else whisperBrowserRecorder = null;
+          updateWhisperButton();
+        });
+        return recorder;
+      }
+
+      function ensureWhisperSourceRecorders() {
+        if (!els.transcriptToggle.checked) return;
+        if (stream && !whisperMicRecorder && !whisperMicBlob) {
+          whisperMicRecorder = createWhisperSourceRecorder(stream, "mic");
+        }
+        if (systemStream && !whisperBrowserRecorder && !whisperBrowserBlob) {
+          whisperBrowserRecorder = createWhisperSourceRecorder(systemStream, "browser");
+        }
+      }
+
+      function startWhisperSourceRecorders() {
+        ensureWhisperSourceRecorders();
+        [whisperMicRecorder, whisperBrowserRecorder].forEach((recorder) => {
+          if (!recorder || recorder.state !== "inactive") return;
+          try {
+            recorder.start(1000);
+          } catch (error) {
+            // Whisper là bước nâng cao; lỗi ở recorder phụ không dừng bản ghi chính.
+          }
+        });
+      }
+
+      function pauseWhisperSourceRecorders() {
+        [whisperMicRecorder, whisperBrowserRecorder].forEach((recorder) => {
+          if (!recorder || recorder.state !== "recording") return;
+          try {
+            recorder.pause();
+          } catch (error) {
+            // Recorder phụ có thể đã tự dừng.
+          }
+        });
+      }
+
+      function resumeWhisperSourceRecorders() {
+        [whisperMicRecorder, whisperBrowserRecorder].forEach((recorder) => {
+          if (!recorder || recorder.state !== "paused") return;
+          try {
+            recorder.resume();
+          } catch (error) {
+            // Recorder phụ có thể đã tự dừng.
+          }
+        });
+      }
+
+      function stopWhisperSourceRecorders() {
+        [whisperMicRecorder, whisperBrowserRecorder].forEach((recorder) => {
+          if (!recorder || recorder.state === "inactive") return;
+          try {
+            recorder.stop();
+          } catch (error) {
+            // Recorder phụ có thể đã tự dừng.
+          }
+        });
+      }
+
+      function clearWhisperCapture() {
+        if (whisperMicRecorder || whisperBrowserRecorder) stopWhisperSourceRecorders();
+        whisperMicChunks = [];
+        whisperBrowserChunks = [];
+        whisperMicBlob = null;
+        whisperBrowserBlob = null;
+        whisperMicRecorder = null;
+        whisperBrowserRecorder = null;
+        whisperRequestInProgress = false;
+        updateWhisperButton();
+      }
+
+      function clearRecordingPreview() { 
         if (recordingUrl) URL.revokeObjectURL(recordingUrl);
         recordingUrl = "";
         recordingBlob = null;
@@ -1082,6 +1206,7 @@
         els.audioPreview.load();
         els.downloadBtn.removeAttribute("href");
         els.resultCard.classList.add("hidden");
+        clearWhisperCapture();
         clearTranscript();
         updateButtons();
       }
@@ -1097,11 +1222,14 @@
         els.downloadBtn.href = recordingUrl;
         els.downloadBtn.download = `ghi-am-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")}.${extension}`;
         els.resultCard.classList.remove("hidden");
+        updateWhisperButton();
         updateButtons();
       }
 
       function sourceLabel(source) {
-        return source === "browser" ? "Trình duyệt" : "Mic";
+        if (source === "browser") return "Trình duyệt";
+        if (source === "whisper") return "Whisper";
+        return "Mic";
       }
 
       function normalizeRecognizedText(text) {
@@ -1464,6 +1592,7 @@
           // Không xóa văn bản đã nhận được; chỉ dừng nhận dạng mới để âm thanh vẫn ghi bình thường.
           clearTranscriptSilenceTimer("mic");
           clearTranscriptSilenceTimer("browser");
+          clearWhisperCapture();
           transcriptInterim = { mic: "", browser: "" };
           transcriptInterimTime = { mic: 0, browser: 0 };
           stopSpeechRecognition();
@@ -1482,6 +1611,8 @@
         browserTranscriptStopRequested = false;
         els.transcriptCard.classList.remove("hidden");
         els.transcriptStatus.textContent = "Đã bật lại chép lời thời gian thực…";
+        ensureWhisperSourceRecorders();
+        if (mediaRecorder?.state === "recording" || mediaRecorder?.state === "paused") startWhisperSourceRecorders();
         if (!els.systemOnlyToggle.checked) startSpeechRecognition();
         if (systemStream && els.systemAudioToggle.checked) startBrowserSpeechRecognition();
         setNotice("Đã bật lại chức năng ghi/xuất âm thanh thành văn bản.", "success");
@@ -1533,6 +1664,84 @@
             transcriptDownloadUrl = "";
           }
         }, 1000);
+      }
+
+      async function requestWhisperTranscription(blob, source) {
+        const query = new URLSearchParams({ source, language: "vi" });
+        const response = await fetch(`/api/whisper/transcribe?${query.toString()}`, {
+          method: "POST",
+          headers: { "Content-Type": blob.type || "audio/webm" },
+          body: blob
+        });
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch (error) {
+          // Server có thể trả lỗi không phải JSON khi endpoint chưa được bật.
+        }
+        if (!response.ok) {
+          throw new Error(payload?.error || `Whisper server trả về HTTP ${response.status}.`);
+        }
+        return payload || {};
+      }
+
+      function addWhisperSegments(source, payload, sourceOrder) {
+        const serverSegments = Array.isArray(payload.segments) && payload.segments.length
+          ? payload.segments
+          : [{ start: 0, text: payload.text || "" }];
+        serverSegments.forEach((segment, segmentIndex) => {
+          const cleanText = normalizeRecognizedText(segment.text || "");
+          if (!cleanText) return;
+          const pieces = splitRecognizedSentences(cleanText);
+          pieces.forEach((piece, pieceIndex) => {
+            transcriptSegments.push({
+              source,
+              text: piece,
+              time: Number(segment.start || 0) * 1000,
+              sequence: (sourceOrder * 100000) + (segmentIndex * 100) + pieceIndex
+            });
+          });
+        });
+      }
+
+      async function runLocalWhisper() {
+        if (whisperRequestInProgress) return;
+        const jobs = [];
+        if (whisperMicBlob) jobs.push({ source: "mic", blob: whisperMicBlob });
+        if (whisperBrowserBlob) jobs.push({ source: "browser", blob: whisperBrowserBlob });
+        if (!jobs.length && recordingBlob) jobs.push({ source: "whisper", blob: recordingBlob });
+        if (!jobs.length) {
+          els.transcriptStatus.textContent = "Chưa có audio riêng để Whisper xử lý. Hãy ghi âm trước.";
+          return;
+        }
+        if (transcriptManuallyEdited && !window.confirm("Whisper sẽ thay thế văn bản tự động hiện tại. Tiếp tục?")) return;
+
+        whisperRequestInProgress = true;
+        updateWhisperButton();
+        els.transcriptCard.classList.remove("hidden");
+        els.transcriptStatus.textContent = "Whisper cục bộ đang xử lý audio để tạo văn bản chính xác hơn…";
+        try {
+          const results = [];
+          // Xử lý tuần tự để không làm máy quá tải khi dùng model medium.
+          for (const job of jobs) {
+            results.push({ source: job.source, payload: await requestWhisperTranscription(job.blob, job.source) });
+          }
+          transcriptSegments = [];
+          transcriptSequence = 0;
+          transcriptInterim = { mic: "", browser: "" };
+          transcriptInterimTime = { mic: 0, browser: 0 };
+          results.forEach((result, index) => addWhisperSegments(result.source, result.payload, index));
+          transcriptSegments.sort((a, b) => a.time - b.time || a.sequence - b.sequence);
+          transcriptManuallyEdited = false;
+          renderTranscript(true);
+          els.transcriptMeta.textContent = "Văn bản đã được Whisper cục bộ xử lý lại. Audio micro và trình duyệt được gửi riêng khi có thể.";
+          els.transcriptStatus.textContent = "Đã hoàn tất Whisper. Bạn có thể chỉnh sửa và tải file TXT.";
+        } catch (error) {
+          els.transcriptStatus.textContent = `Không thể chạy Whisper cục bộ: ${error.message || "hãy khởi động whisper_server.py"}.`;
+        } finally {
+          whisperRequestInProgress = false;
+          updateWhisperButton();
+        }
       }
 
       function stopStreamTracks(mediaStream) {
@@ -1739,11 +1948,12 @@
       async function requestMicrophoneStream() {
         return navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: true,
-            // Tắt noise suppression để không vô tình cắt mất giọng thì thầm; nhánh phát hiện có bộ lọc riêng.
+            // Giữ tín hiệu micro gốc; không để trình duyệt khử tiếng vọng làm méo hoặc cắt mất từ.
+            echoCancellation: false,
+            // Tắt các bộ xử lý tự động trên đường âm thanh được lưu.
             noiseSuppression: false,
-            // Giữ tín hiệu micro gốc; không để trình duyệt tự động khuếch đại đường âm thanh được lưu.
-            autoGainControl: false
+            autoGainControl: false,
+            channelCount: { ideal: 1 }
           },
           video: false
         });
@@ -1833,7 +2043,11 @@
           systemSource = source;
           systemGainNode = unityGain;
           attachSystemStreamHandlers(capturedStream);
-          if (isMonitoring) startBrowserSpeechRecognition();
+          ensureWhisperSourceRecorders();
+          if (isMonitoring) {
+            startBrowserSpeechRecognition();
+            if (mediaRecorder?.state === "recording" || mediaRecorder?.state === "paused") startWhisperSourceRecorders();
+          }
         } catch (error) {
           stopStreamTracks(capturedStream);
           throw error;
@@ -1976,6 +2190,7 @@
         stopMonitoringLoop();
         releaseWakeLock();
         stopSpeechRecognition();
+        stopWhisperSourceRecorders();
         disconnectSpeechRecognitionTracks();
         const currentAudioContext = audioContext;
         const currentDetectionSource = detectionSource;
@@ -2105,6 +2320,7 @@
           } else {
             return;
           }
+          startWhisperSourceRecorders();
           setStatus("recording", "Đang ghi âm", `Đang ghi âm thanh trình duyệt/thiết bị. Sau ${formatSilenceLabel(silenceLimitMs)} không có âm thanh, bản ghi sẽ tự tạm dừng.`);
           setNotice("Đang ghi âm thanh trình duyệt/thiết bị; không cần nói hoặc dùng micro.", "success");
         } catch (error) {
@@ -2118,6 +2334,7 @@
         try {
           mediaRecorder.start(250);
           segmentStartedAt = performance.now();
+          startWhisperSourceRecorders();
           setStatus("recording", "Đang ghi âm", els.systemOnlyToggle.checked
             ? `Đang chỉ ghi âm thanh trình duyệt/thiết bị. Khi im lặng đủ ${formatSilenceLabel(silenceLimitMs)}, bản ghi sẽ tự tạm dừng.`
             : `Đang thu tiếng nói. Khi im lặng đủ ${formatSilenceLabel(silenceLimitMs)}, bản ghi sẽ tự tạm dừng.`);
@@ -2135,6 +2352,7 @@
         try {
           mediaRecorder.resume();
           segmentStartedAt = performance.now();
+          resumeWhisperSourceRecorders();
           silenceStartedAt = null;
           updateSilenceProgress(0, false);
           setStatus("recording", "Đang ghi âm", els.systemOnlyToggle.checked
@@ -2154,6 +2372,7 @@
         try {
           commitActiveDuration();
           mediaRecorder.pause();
+          pauseWhisperSourceRecorders();
           if (els.transcriptToggle.checked) {
             commitInterimTranscript("mic");
             commitInterimTranscript("browser");
@@ -2328,6 +2547,7 @@
 
         const systemOnlyMode = els.systemOnlyToggle.checked;
         clearTranscript();
+        clearWhisperCapture();
         recordingUsedSystemOnly = systemOnlyMode;
 
         if (!navigator.mediaDevices || (!systemOnlyMode && typeof navigator.mediaDevices.getUserMedia !== "function")) {
@@ -2386,12 +2606,13 @@
           if (systemStream) {
             connectSystemAudioStream(systemStream);
           }
+          ensureWhisperSourceRecorders();
 
           const mimeType = supportedMimeType();
           const mixedAudioStream = recordingDestination.stream;
-          mediaRecorder = mimeType
-            ? new MediaRecorder(mixedAudioStream, { mimeType })
-            : new MediaRecorder(mixedAudioStream);
+          const recorderOptions = { audioBitsPerSecond: 192000 };
+          if (mimeType) recorderOptions.mimeType = mimeType;
+          mediaRecorder = new MediaRecorder(mixedAudioStream, recorderOptions);
           chunks = [];
           isMonitoring = true;
           isStartingSession = false;
@@ -2451,6 +2672,7 @@
         // Cho Speech Recognition cơ hội trả nốt kết quả cuối trước khi đóng phiên ghi âm.
         stopSpeechRecognition();
         discardOnStop = discard;
+        stopWhisperSourceRecorders();
         if (mediaRecorder && mediaRecorder.state !== "inactive") {
           commitActiveDuration();
           try {
@@ -2504,6 +2726,7 @@
       els.deleteBtn.addEventListener("click", deleteCurrentRecording);
       els.deleteResultBtn.addEventListener("click", deleteCurrentRecording);
       els.downloadTranscriptBtn.addEventListener("click", downloadTranscript);
+      els.whisperBtn.addEventListener("click", runLocalWhisper);
       els.clearTranscriptBtn.addEventListener("click", clearTranscript);
       els.transcriptText.addEventListener("input", handleTranscriptInput);
       els.thresholdInput.addEventListener("input", (event) => {
@@ -2558,5 +2781,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4de175f5fb1715e',t:'MTc5MjU2Mjk0Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4de355c6ef484d8',t:'MTc5MjU2NDE3Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

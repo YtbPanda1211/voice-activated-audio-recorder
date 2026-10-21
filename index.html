@@ -841,6 +841,7 @@
 
       const DEFAULT_SILENCE_LIMIT_MS = 5000;
       const TRANSCRIPT_RESTART_DELAY_MS = 80;
+      const TRANSCRIPT_SILENCE_COMMIT_DELAY_MS = 350;
       const TRANSCRIPT_MAX_ALTERNATIVES = 5;
       const THEME_STORAGE_KEY = "voice-recorder-theme";
       const DEFAULT_STATUS_DETAIL = "Nhấn “Bắt đầu nghe” để cấp quyền micro và chờ tiếng nói.";
@@ -937,6 +938,7 @@
       let transcriptSequence = 0;
       let transcriptInterim = { mic: "", browser: "" };
       let transcriptInterimTime = { mic: 0, browser: 0 };
+      let transcriptSilenceTimers = { mic: null, browser: null };
       let transcriptManuallyEdited = false;
       let transcriptDownloadUrl = "";
       let recordingUsedSystemOnly = false;
@@ -1112,15 +1114,6 @@
           .trim();
       }
 
-      function splitRecognizedSentences(text) {
-        const cleanText = normalizeRecognizedText(text);
-        if (!cleanText) return [];
-        // Giữ nguyên dấu câu ở cuối từng câu; các câu cùng một kết quả vẫn được tách thành từng dòng.
-        return cleanText.match(/[^.!?。！？]+[.!?。！？]+|[^.!?。！？]+$/g)
-          ?.map((part) => part.trim())
-          .filter(Boolean) || [];
-      }
-
       function getCombinedTranscript() {
         const lines = transcriptSegments.map((segment) => ({
           time: segment.time,
@@ -1173,6 +1166,10 @@
           URL.revokeObjectURL(transcriptDownloadUrl);
           transcriptDownloadUrl = "";
         }
+        Object.values(transcriptSilenceTimers).forEach((timer) => {
+          if (timer !== null) window.clearTimeout(timer);
+        });
+        transcriptSilenceTimers = { mic: null, browser: null };
         transcriptSegments = [];
         transcriptSequence = 0;
         transcriptInterim = { mic: "", browser: "" };
@@ -1204,12 +1201,32 @@
         transcriptSegments.sort((a, b) => a.time - b.time || a.sequence - b.sequence);
       }
 
+      function clearTranscriptSilenceTimer(source) {
+        const timer = transcriptSilenceTimers[source];
+        if (timer !== null) window.clearTimeout(timer);
+        transcriptSilenceTimers[source] = null;
+      }
+
       function commitInterimTranscript(source, time = performance.now()) {
+        clearTranscriptSilenceTimer(source);
         const text = transcriptInterim[source];
         if (!text) return;
         appendTranscriptFinal(source, text, time);
         transcriptInterim[source] = "";
         transcriptInterimTime[source] = 0;
+      }
+
+      function scheduleTranscriptSilenceCommit(source) {
+        clearTranscriptSilenceTimer(source);
+        transcriptSilenceTimers[source] = window.setTimeout(() => {
+          transcriptSilenceTimers[source] = null;
+          if (!els.transcriptToggle.checked) return;
+          if (transcriptInterim[source]) {
+            commitInterimTranscript(source);
+            renderTranscript(true);
+            els.transcriptStatus.textContent = `Đã ngắt dòng sau khoảng lặng — đang chờ câu tiếp theo từ ${sourceLabel(source)}…`;
+          }
+        }, TRANSCRIPT_SILENCE_COMMIT_DELAY_MS);
       }
 
       function createSpeechRecognition(source) {
@@ -1234,8 +1251,18 @@
           els.transcriptStatus.textContent = `Đang nhận dạng tiếng nói từ ${sourceLabel(source)}…`;
         };
 
+        recognition.onspeechstart = () => {
+          clearTranscriptSilenceTimer(source);
+        };
+
+        recognition.onspeechend = () => {
+          // Giữ phần interim hiện tại thành một dòng riêng sau khi người dùng ngừng nói.
+          scheduleTranscriptSilenceCommit(source);
+        };
+
         recognition.onresult = (event) => {
           if (!els.transcriptToggle.checked) return;
+          clearTranscriptSilenceTimer(source);
           let interimText = "";
           const resultTime = performance.now();
           for (let index = event.resultIndex; index < event.results.length; index += 1) {
@@ -1435,6 +1462,8 @@
       function handleTranscriptToggle() {
         if (!els.transcriptToggle.checked) {
           // Không xóa văn bản đã nhận được; chỉ dừng nhận dạng mới để âm thanh vẫn ghi bình thường.
+          clearTranscriptSilenceTimer("mic");
+          clearTranscriptSilenceTimer("browser");
           transcriptInterim = { mic: "", browser: "" };
           transcriptInterimTime = { mic: 0, browser: 0 };
           stopSpeechRecognition();
@@ -2125,6 +2154,11 @@
         try {
           commitActiveDuration();
           mediaRecorder.pause();
+          if (els.transcriptToggle.checked) {
+            commitInterimTranscript("mic");
+            commitInterimTranscript("browser");
+            renderTranscript(true);
+          }
           silenceStartedAt = null;
           updateSilenceProgress(0, false);
           setStatus("paused", "Đang tạm dừng", `Đã im lặng ${formatSilenceLabel(silenceLimitMs)}. Hãy nói lại để tiếp tục ghi trên bản ghi này.`);
@@ -2524,5 +2558,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4dde3a6d9f58b7b',t:'MTc5MjU2MDgyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4de175f5fb1715e',t:'MTc5MjU2Mjk0Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

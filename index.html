@@ -724,6 +724,17 @@
         </label>
       </div>
 
+      <div class="capture-option">
+        <div>
+          <label for="transcriptToggle">Ghi và xuất âm thanh thành văn bản</label>
+          <small id="transcriptToggleHelp">Bật để nhận dạng giọng nói theo thời gian thực và cho phép tải văn bản `.txt`. Tắt chỉ dừng chép lời; bản ghi âm vẫn tiếp tục bình thường.</small>
+        </div>
+        <label class="switch" title="Bật hoặc tắt chức năng chép lời và xuất văn bản">
+          <input id="transcriptToggle" type="checkbox" aria-describedby="transcriptToggleHelp" checked />
+          <span class="switch-track" aria-hidden="true"></span>
+        </label>
+      </div>
+
       <div class="controls">
         <button id="startBtn" class="button button-primary" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -869,6 +880,7 @@
         clearTranscriptBtn: document.getElementById("clearTranscriptBtn"),
         systemAudioToggle: document.getElementById("systemAudioToggle"),
         systemOnlyToggle: document.getElementById("systemOnlyToggle"),
+        transcriptToggle: document.getElementById("transcriptToggle"),
         themeToggle: document.getElementById("themeToggle"),
         themeToggleLabel: document.getElementById("themeToggleLabel")
       };
@@ -1215,6 +1227,7 @@
         };
 
         recognition.onresult = (event) => {
+          if (!els.transcriptToggle.checked) return;
           let interimText = "";
           const resultTime = performance.now();
           for (let index = event.resultIndex; index < event.results.length; index += 1) {
@@ -1302,7 +1315,7 @@
       function startSpeechRecognition(options = {}) {
         const allowBeforeRecording = options.allowBeforeRecording === true;
         const forceDefaultMicrophone = options.forceDefaultMicrophone === true;
-        if ((!isMonitoring && !isStartingSession && !allowBeforeRecording) || els.systemOnlyToggle.checked) return;
+        if ((!isMonitoring && !isStartingSession && !allowBeforeRecording) || els.systemOnlyToggle.checked || !els.transcriptToggle.checked) return;
         els.transcriptCard.classList.remove("hidden");
         if (!initializeSpeechRecognition()) {
           setNotice("Trình duyệt không hỗ trợ nhận dạng giọng nói. Hãy dùng Chrome hoặc Edge bản mới để tạo văn bản.", "error");
@@ -1343,7 +1356,7 @@
       }
 
       function startBrowserSpeechRecognition() {
-        if (!isMonitoring || !systemStream || !els.systemAudioToggle.checked) return;
+        if (!isMonitoring || !systemStream || !els.systemAudioToggle.checked || !els.transcriptToggle.checked) return;
         els.transcriptCard.classList.remove("hidden");
         if (!initializeSpeechRecognition() || !browserTranscriptRecognition) return;
         const audioTrack = systemStream.getAudioTracks().find((track) => track.readyState === "live");
@@ -1392,12 +1405,43 @@
         stopBrowserSpeechRecognition();
       }
 
+      function handleTranscriptToggle() {
+        if (!els.transcriptToggle.checked) {
+          // Không xóa văn bản đã nhận được; chỉ dừng nhận dạng mới để âm thanh vẫn ghi bình thường.
+          transcriptInterim = { mic: "", browser: "" };
+          transcriptInterimTime = { mic: 0, browser: 0 };
+          stopSpeechRecognition();
+          renderTranscript();
+          els.transcriptStatus.textContent = "Đã tắt chép lời. Bản ghi âm vẫn tiếp tục; văn bản hiện có vẫn được giữ lại.";
+          setNotice("Đã tắt chức năng ghi/xuất âm thanh thành văn bản. Âm thanh vẫn tiếp tục được ghi.");
+          return;
+        }
+
+        if (!isMonitoring) {
+          setNotice("Đã bật chức năng ghi/xuất âm thanh thành văn bản cho phiên ghi tiếp theo.", "success");
+          return;
+        }
+
+        transcriptStopRequested = false;
+        browserTranscriptStopRequested = false;
+        els.transcriptCard.classList.remove("hidden");
+        els.transcriptStatus.textContent = "Đã bật lại chép lời thời gian thực…";
+        if (!els.systemOnlyToggle.checked) startSpeechRecognition();
+        if (systemStream && els.systemAudioToggle.checked) startBrowserSpeechRecognition();
+        setNotice("Đã bật lại chức năng ghi/xuất âm thanh thành văn bản.", "success");
+      }
+
       function showTranscriptResult() {
         els.transcriptCard.classList.remove("hidden");
         renderTranscript();
         const text = getEditableTranscript();
 
-        if (!transcriptSupported && !browserTranscriptSupported) {
+        if (!els.transcriptToggle.checked) {
+          els.transcriptMeta.textContent = "Chức năng ghi/xuất âm thanh thành văn bản đang được tắt.";
+          els.transcriptStatus.textContent = text
+            ? "Đã giữ lại văn bản đã nhận trước đó; không nhận dạng thêm trong phiên này."
+            : "Bản ghi âm vẫn có thể nghe lại hoặc tải xuống riêng.";
+        } else if (!transcriptSupported && !browserTranscriptSupported) {
           els.transcriptMeta.textContent = "Trình duyệt không hỗ trợ Speech Recognition. Hãy dùng Chrome hoặc Edge bản mới để tạo văn bản tự động.";
           els.transcriptStatus.textContent = "Không có văn bản tự động. Bản ghi âm vẫn có thể tải xuống.";
         } else if (recordingUsedSystemOnly && !browserTranscriptSupported) {
@@ -2344,6 +2388,7 @@
         else disableSystemAudio();
       });
       els.systemOnlyToggle.addEventListener("change", handleSystemOnlyToggle);
+      els.transcriptToggle.addEventListener("change", handleTranscriptToggle);
       els.themeToggle.addEventListener("click", toggleTheme);
       document.addEventListener("visibilitychange", () => {
         if (!isMonitoring) return;
@@ -2369,5 +2414,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a49c6ed56d9a851b',t:'MTc5MTg3NDQ2Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>

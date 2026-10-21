@@ -894,6 +894,12 @@
       let microphoneDetectionGain = null;
       let microphoneDetectionCompressor = null;
       let microphoneRecordingConnected = false;
+      let transcriptMicrophoneGain = null;
+      let transcriptMicrophoneCompressor = null;
+      let transcriptMicrophoneDestination = null;
+      let transcriptBrowserGain = null;
+      let transcriptBrowserCompressor = null;
+      let transcriptBrowserDestination = null;
       let systemSource = null;
       let systemGainNode = null;
       let recordingDestination = null;
@@ -923,6 +929,7 @@
       let browserTranscriptSupported = false;
       let transcriptRunning = false;
       let transcriptStartPending = false;
+      let transcriptPreferDefaultMicrophone = false;
       let browserTranscriptRunning = false;
       let transcriptStopRequested = false;
       let browserTranscriptStopRequested = false;
@@ -1220,6 +1227,7 @@
           if (source === "mic") {
             transcriptRunning = true;
             transcriptStartPending = false;
+            transcriptPreferDefaultMicrophone = false;
           } else {
             browserTranscriptRunning = true;
           }
@@ -1257,9 +1265,21 @@
             const permissionMessage = `Trình duyệt chưa cho phép nhận dạng từ ${sourceLabel(source)}.`;
             els.transcriptStatus.textContent = permissionMessage;
             if (isMic) setNotice(permissionMessage, "error");
-          } else if (event.error === "audio-capture" && source === "browser") {
-            browserTranscriptSupported = false;
-            els.transcriptStatus.textContent = "Trình duyệt không cho phép đưa audio track trình duyệt vào Speech Recognition.";
+          } else if (event.error === "audio-capture") {
+            if (isMic) {
+              // Một số trình duyệt không nhận track tạo từ Web Audio; thử lại bằng micro mặc định.
+              transcriptPreferDefaultMicrophone = true;
+              els.transcriptStatus.textContent = "Đang chuyển sang micro mặc định để tăng khả năng tương thích…";
+            } else {
+              browserTranscriptSupported = false;
+              browserTranscriptStopRequested = true;
+              els.transcriptStatus.textContent = "Trình duyệt không cho phép đưa audio track trình duyệt vào Speech Recognition.";
+            }
+          } else if (event.error === "network") {
+            if (isMic) transcriptStopRequested = true;
+            else browserTranscriptStopRequested = true;
+            els.transcriptStatus.textContent = `Dịch vụ nhận dạng ${sourceLabel(source)} cần kết nối mạng hoặc hiện không khả dụng.`;
+            if (isMic) setNotice("Không thể kết nối dịch vụ nhận dạng giọng nói. Hãy kiểm tra mạng rồi thử lại.", "error");
           } else {
             els.transcriptStatus.textContent = `Không thể nhận dạng ${sourceLabel(source)}: ${event.error || "lỗi không xác định"}.`;
           }
@@ -1289,7 +1309,7 @@
             : !browserTranscriptStopRequested && Boolean(systemStream) && Boolean(els.systemAudioToggle.checked);
           if (shouldRestart) {
             window.setTimeout(() => {
-              if (source === "mic") startSpeechRecognition();
+              if (source === "mic") startSpeechRecognition({ forceDefaultMicrophone: transcriptPreferDefaultMicrophone });
               else startBrowserSpeechRecognition();
             }, TRANSCRIPT_RESTART_DELAY_MS);
           }
@@ -1325,7 +1345,8 @@
 
         const micTrack = forceDefaultMicrophone
           ? null
-          : stream?.getAudioTracks().find((track) => track.readyState === "live");
+          : createSpeechRecognitionTrack(microphoneSource, "mic")
+            || stream?.getAudioTracks().find((track) => track.readyState === "live");
         transcriptStopRequested = false;
         transcriptStartPending = true;
         els.transcriptCard.classList.remove("hidden");
@@ -1359,7 +1380,8 @@
         if (!isMonitoring || !systemStream || !els.systemAudioToggle.checked || !els.transcriptToggle.checked) return;
         els.transcriptCard.classList.remove("hidden");
         if (!initializeSpeechRecognition() || !browserTranscriptRecognition) return;
-        const audioTrack = systemStream.getAudioTracks().find((track) => track.readyState === "live");
+        const audioTrack = createSpeechRecognitionTrack(systemSource, "browser")
+          || systemStream.getAudioTracks().find((track) => track.readyState === "live");
         if (!audioTrack) return;
 
         browserTranscriptStopRequested = false;
@@ -1369,8 +1391,13 @@
         } catch (error) {
           if (error?.name === "TypeError" || error?.name === "NotSupportedError") {
             browserTranscriptSupported = false;
+            browserTranscriptStopRequested = true;
             els.transcriptStatus.textContent = "Trình duyệt không hỗ trợ nhận dạng trực tiếp audio track trình duyệt.";
-          } else if (error?.name !== "InvalidStateError") {
+          } else if (error?.name === "InvalidStateError") {
+            browserTranscriptSupported = false;
+            browserTranscriptStopRequested = true;
+            els.transcriptStatus.textContent = "Speech Recognition của trình duyệt không cho phép chạy thêm nguồn Trình duyệt đồng thời với nguồn Mic.";
+          } else {
             els.transcriptStatus.textContent = `Không thể bắt đầu nhận dạng Trình duyệt: ${error.message || "lỗi không xác định"}.`;
           }
         }
@@ -1564,6 +1591,86 @@
         microphoneRecordingConnected = false;
       }
 
+      function createSpeechRecognitionTrack(source, kind) {
+        if (!audioContext || !source) return null;
+        const isMic = kind === "mic";
+        const existingDestination = isMic ? transcriptMicrophoneDestination : transcriptBrowserDestination;
+        if (existingDestination) return existingDestination.stream.getAudioTracks().find((track) => track.readyState === "live") || null;
+
+        const gain = audioContext.createGain();
+        const compressor = audioContext.createDynamicsCompressor();
+        const destination = audioContext.createMediaStreamDestination();
+        // Chỉ làm rõ tín hiệu cho Speech Recognition; đường MediaStreamDestination dùng để lưu file không đi qua nhánh này.
+        gain.gain.setValueAtTime(isMic ? 2.0 : 1.5, audioContext.currentTime);
+        compressor.threshold.setValueAtTime(-30, audioContext.currentTime);
+        compressor.knee.setValueAtTime(24, audioContext.currentTime);
+        compressor.ratio.setValueAtTime(3, audioContext.currentTime);
+        compressor.attack.setValueAtTime(0.005, audioContext.currentTime);
+        compressor.release.setValueAtTime(0.2, audioContext.currentTime);
+        source.connect(gain);
+        gain.connect(compressor);
+        compressor.connect(destination);
+
+        if (isMic) {
+          transcriptMicrophoneGain = gain;
+          transcriptMicrophoneCompressor = compressor;
+          transcriptMicrophoneDestination = destination;
+        } else {
+          transcriptBrowserGain = gain;
+          transcriptBrowserCompressor = compressor;
+          transcriptBrowserDestination = destination;
+        }
+        return destination.stream.getAudioTracks().find((track) => track.readyState === "live") || null;
+      }
+
+      function disconnectSpeechRecognitionTracks() {
+        const pairs = [
+          [transcriptMicrophoneGain, transcriptMicrophoneCompressor],
+          [transcriptMicrophoneCompressor, transcriptMicrophoneDestination],
+          [transcriptBrowserGain, transcriptBrowserCompressor],
+          [transcriptBrowserCompressor, transcriptBrowserDestination]
+        ];
+        pairs.forEach(([from, to]) => {
+          if (!from) return;
+          try {
+            if (to) from.disconnect(to);
+            else from.disconnect();
+          } catch (error) {
+            // Nhánh STT có thể đã tự ngắt khi phiên nhận dạng kết thúc.
+          }
+        });
+        [transcriptMicrophoneDestination, transcriptBrowserDestination].forEach((destination) => {
+          if (destination) stopStreamTracks(destination.stream);
+        });
+        transcriptMicrophoneGain = null;
+        transcriptMicrophoneCompressor = null;
+        transcriptMicrophoneDestination = null;
+        transcriptBrowserGain = null;
+        transcriptBrowserCompressor = null;
+        transcriptBrowserDestination = null;
+      }
+
+      function disconnectBrowserSpeechRecognitionTrack() {
+        if (transcriptBrowserGain && transcriptBrowserCompressor) {
+          try {
+            transcriptBrowserGain.disconnect(transcriptBrowserCompressor);
+          } catch (error) {
+            // Nhánh STT trình duyệt có thể đã tự ngắt.
+          }
+        }
+        if (transcriptBrowserCompressor && transcriptBrowserDestination) {
+          try {
+            transcriptBrowserCompressor.disconnect(transcriptBrowserDestination);
+          } catch (error) {
+            // Nhánh STT trình duyệt có thể đã tự ngắt.
+          }
+        }
+        if (transcriptBrowserDestination) stopStreamTracks(transcriptBrowserDestination.stream);
+        transcriptBrowserGain = null;
+        transcriptBrowserCompressor = null;
+        transcriptBrowserDestination = null;
+      }
+
       function systemAudioErrorMessage(error) {
         if (error?.code === "NO_SYSTEM_AUDIO") {
           return "Nguồn chia sẻ chưa có âm thanh. Hãy thử lại và bật tùy chọn “Chia sẻ âm thanh” trong hộp thoại của trình duyệt.";
@@ -1624,6 +1731,7 @@
         const hasLiveAudio = systemStream.getAudioTracks().some((track) => track.readyState === "live");
         if (hasLiveAudio) return;
         stopBrowserSpeechRecognition();
+        disconnectBrowserSpeechRecognitionTrack();
 
         const endedSystemSource = systemSource;
         const endedSystemGain = systemGainNode;
@@ -1705,6 +1813,7 @@
 
       function disableSystemAudio(showNotice = true) {
         stopBrowserSpeechRecognition();
+        disconnectBrowserSpeechRecognitionTrack();
         const currentSystemSource = systemSource;
         const currentSystemGain = systemGainNode;
         if (currentSystemGain && recordingDestination) {
@@ -1838,6 +1947,7 @@
         stopMonitoringLoop();
         releaseWakeLock();
         stopSpeechRecognition();
+        disconnectSpeechRecognitionTracks();
         const currentAudioContext = audioContext;
         const currentDetectionSource = detectionSource;
         const currentMicrophoneSource = microphoneSource;
@@ -2414,5 +2524,5 @@
       updateButtons();
     })();
   </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4dde3a6d9f58b7b',t:'MTc5MjU2MDgyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

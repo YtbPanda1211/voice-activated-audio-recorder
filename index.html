@@ -677,7 +677,7 @@
 
       <div id="silenceBox" class="silence-box is-hidden" aria-live="polite">
         <div class="silence-row">
-          <span>Không phát hiện tiếng nói — sẽ tạm dừng sau <span id="silenceLimitLabel">5 giây</span></span>
+          <span>Không phát hiện tiếng nói/âm thanh — sẽ tạm dừng sau <span id="silenceLimitLabel">5 giây</span></span>
           <strong id="silenceCountdown">5.0s</strong>
         </div>
         <div class="progress-track"><div id="silenceProgress" class="progress-bar"></div></div>
@@ -891,6 +891,7 @@
       let audioContext = null;
       let analyser = null;
       let detectionSource = null;
+      let detectionSources = new Set();
       let microphoneSource = null;
       let microphoneDetectionGain = null;
       let microphoneDetectionCompressor = null;
@@ -1522,29 +1523,28 @@
       }
 
       function connectDetectionSource(source) {
-        if (!source || !analyser || detectionSource === source) return;
-        if (detectionSource) {
-          try {
-            detectionSource.disconnect(analyser);
-          } catch (error) {
-            // Nguồn phát hiện cũ đã được ngắt.
-          }
+        if (!source || !analyser || detectionSources.has(source)) return;
+        try {
+          // Nhiều nguồn được nối đồng thời vào cùng analyser: chỉ cần Mic hoặc trình duyệt có tiếng là bắt đầu ghi.
+          source.connect(analyser);
+          detectionSources.add(source);
+          detectionSource = source;
+        } catch (error) {
+          // Nguồn phát hiện có thể đã tự ngắt.
         }
-        source.connect(analyser);
-        detectionSource = source;
       }
 
       function disconnectDetectionSource(source = detectionSource) {
-        if (!source || !analyser) {
-          if (source === detectionSource) detectionSource = null;
-          return;
+        if (!source) return;
+        if (analyser) {
+          try {
+            source.disconnect(analyser);
+          } catch (error) {
+            // Nguồn phát hiện đã được ngắt.
+          }
         }
-        try {
-          source.disconnect(analyser);
-        } catch (error) {
-          // Nguồn phát hiện đã được ngắt.
-        }
-        if (source === detectionSource) detectionSource = null;
+        detectionSources.delete(source);
+        if (source === detectionSource) detectionSource = detectionSources.values().next().value || null;
       }
 
       async function ensureMicrophoneForSession() {
@@ -1780,7 +1780,8 @@
           unityGain.gain.setValueAtTime(1.0, audioContext.currentTime);
           source.connect(unityGain);
           unityGain.connect(recordingDestination);
-          if (els.systemOnlyToggle.checked) connectDetectionSource(unityGain);
+          // Theo dõi cả audio trình duyệt và micro; nguồn nào có tiếng trước cũng khởi động bản ghi.
+          connectDetectionSource(unityGain);
           systemStream = capturedStream;
           systemSource = source;
           systemGainNode = unityGain;
@@ -1847,6 +1848,7 @@
           if (requestedSystemOnly) {
             els.systemOnlyToggle.checked = false;
             recordingUsedSystemOnly = false;
+            connectMicrophoneDetection();
             connectMicrophoneToRecording();
             startSpeechRecognition();
           }
@@ -1884,6 +1886,7 @@
           if (els.systemOnlyToggle.checked && systemStream) {
             recordingUsedSystemOnly = true;
             disconnectMicrophoneFromRecording();
+            disconnectDetectionSource(microphoneDetectionGain || microphoneDetectionCompressor);
             connectDetectionSource(systemGainNode || systemSource);
             startBrowserSpeechRecognition();
             startSystemOnlyRecording();
@@ -1915,6 +1918,7 @@
         if (restoreSystemAudio) {
           els.systemAudioToggle.checked = true;
           if (!systemStream) await enableSystemAudio();
+          if (systemStream) connectDetectionSource(systemGainNode || systemSource);
           setNotice(systemStream
             ? "Đã tắt chế độ chỉ thiết bị. Đang ghi cả âm thanh trình duyệt/thiết bị và micro."
             : "Không có âm thanh thiết bị; đang tiếp tục chỉ ghi micro.", "success");
@@ -1948,6 +1952,14 @@
             // Nguồn phát hiện có thể đã được ngắt khi trình duyệt dừng capture.
           }
         }
+        detectionSources.forEach((source) => {
+          try {
+            source.disconnect(analyser);
+          } catch (error) {
+            // Nguồn phát hiện có thể đã được ngắt.
+          }
+        });
+        detectionSources.clear();
         if (currentMicrophoneSource) {
           try {
             currentMicrophoneSource.disconnect();
@@ -2115,7 +2127,7 @@
           }
           silenceStartedAt = null;
           updateSilenceProgress(0, false);
-          setStatus("paused", "Đang tạm dừng", `Đã im lặng ${formatSilenceLabel(silenceLimitMs)}. Hãy nói lại để tiếp tục ghi trên bản ghi này.`);
+          setStatus("paused", "Đang tạm dừng", `Đã không có tiếng nói/âm thanh trong ${formatSilenceLabel(silenceLimitMs)}. Hãy nói hoặc phát âm thanh lại để tiếp tục ghi.`);
           setNotice("Bản ghi đang tạm dừng, không tạo tệp mới.");
         } catch (error) {
           setNotice(`Không thể tạm dừng ghi âm: ${error.message || "lỗi không xác định"}`, "error");
@@ -2142,12 +2154,12 @@
           const silentFor = now - silenceStartedAt;
           const progress = silentFor / silenceLimitMs;
           updateSilenceProgress(progress, true);
-          setStatus("countdown", "Đang chờ tiếng nói", `Không phát hiện tiếng nói. Bản ghi sẽ tạm dừng sau ${Math.max(0, (silenceLimitMs - silentFor) / 1000).toFixed(1)} giây.`);
+          setStatus("countdown", "Đang chờ âm thanh", `Không phát hiện tiếng nói hoặc âm thanh. Bản ghi sẽ tạm dừng sau ${Math.max(0, (silenceLimitMs - silentFor) / 1000).toFixed(1)} giây.`);
 
           if (silentFor >= silenceLimitMs) pauseRecording();
         } else if (mediaRecorder.state === "paused") {
           updateSilenceProgress(0, false);
-          setStatus("paused", "Đang tạm dừng", `Đã im lặng ${formatSilenceLabel(silenceLimitMs)}. Hãy nói lại để tiếp tục ghi trên bản ghi này.`);
+          setStatus("paused", "Đang tạm dừng", `Đã không có tiếng nói/âm thanh trong ${formatSilenceLabel(silenceLimitMs)}. Hãy nói hoặc phát âm thanh lại để tiếp tục ghi.`);
         }
       }
 
@@ -2374,9 +2386,9 @@
               ? "Micro và âm thanh trình duyệt/thiết bị đã sẵn sàng. Hãy nói để bắt đầu ghi âm."
               : "Micro đã sẵn sàng. Hãy nói để bắt đầu ghi âm.";
             setStatus("waiting", "Đang chờ tiếng nói", sourceText);
-            setNotice(systemStream
-              ? "Đang nghe micro và âm thanh trình duyệt/thiết bị. Bản ghi chỉ bắt đầu khi phát hiện tiếng nói."
-              : "Đang nghe micro. Bản ghi chỉ bắt đầu khi phát hiện tiếng nói.");
+          setNotice(systemStream
+            ? "Đang nghe micro và âm thanh trình duyệt/thiết bị. Bản ghi bắt đầu khi phát hiện tiếng nói hoặc âm thanh từ một trong hai nguồn."
+            : "Đang nghe micro. Bản ghi chỉ bắt đầu khi phát hiện tiếng nói.");
           }
           updateButtons();
           startMonitoringLoop();
@@ -2512,5 +2524,5 @@
       updateButtons();
     })();
   </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a5cb76984adb7d31',t:'MTc5NTA1MTk2OQ=='};var l=window.parent.location,o;try{o=new URL(l.origin).origin}catch(e){try{o=new URL(new URL(l.href).origin).origin}catch(e){o=''}}var u='/cdn-cgi/challenge-platform/scripts/jsd/main.js?ray=a5cb76984adb7d31',a=document.createElement('script');a.src=o?new URL(u,o).href:u;document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

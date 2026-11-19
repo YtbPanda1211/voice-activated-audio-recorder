@@ -895,6 +895,9 @@
       let microphoneDetectionGain = null;
       let microphoneDetectionCompressor = null;
       let microphoneRecordingConnected = false;
+      let browserTranscriptGain = null;
+      let browserTranscriptCompressor = null;
+      let browserTranscriptDestination = null;
       let systemSource = null;
       let systemGainNode = null;
       let recordingDestination = null;
@@ -1386,7 +1389,8 @@
         if (!isMonitoring || !systemStream || !els.systemAudioToggle.checked || !els.transcriptToggle.checked) return;
         els.transcriptCard.classList.remove("hidden");
         if (!initializeSpeechRecognition() || !browserTranscriptRecognition) return;
-        const audioTrack = systemStream.getAudioTracks().find((track) => track.readyState === "live");
+        const audioTrack = createBrowserSpeechRecognitionTrack()
+          || systemStream.getAudioTracks().find((track) => track.readyState === "live");
         if (!audioTrack) return;
 
         browserTranscriptStopRequested = false;
@@ -1658,6 +1662,7 @@
         const hasLiveAudio = systemStream.getAudioTracks().some((track) => track.readyState === "live");
         if (hasLiveAudio) return;
         stopBrowserSpeechRecognition();
+        disconnectBrowserSpeechRecognitionTrack();
 
         const endedSystemSource = systemSource;
         const endedSystemGain = systemGainNode;
@@ -1705,6 +1710,56 @@
         }
       }
 
+      function createBrowserSpeechRecognitionTrack() {
+        if (!audioContext || !systemSource) return null;
+        if (browserTranscriptDestination) {
+          return browserTranscriptDestination.stream.getAudioTracks().find((track) => track.readyState === "live") || null;
+        }
+
+        try {
+          const gain = audioContext.createGain();
+          const compressor = audioContext.createDynamicsCompressor();
+          const destination = audioContext.createMediaStreamDestination();
+          // Chỉ tăng độ rõ cho STT; không nối nhánh này vào recordingDestination.
+          gain.gain.setValueAtTime(2.5, audioContext.currentTime);
+          compressor.threshold.setValueAtTime(-30, audioContext.currentTime);
+          compressor.knee.setValueAtTime(24, audioContext.currentTime);
+          compressor.ratio.setValueAtTime(4, audioContext.currentTime);
+          compressor.attack.setValueAtTime(0.003, audioContext.currentTime);
+          compressor.release.setValueAtTime(0.2, audioContext.currentTime);
+          systemSource.connect(gain);
+          gain.connect(compressor);
+          compressor.connect(destination);
+          browserTranscriptGain = gain;
+          browserTranscriptCompressor = compressor;
+          browserTranscriptDestination = destination;
+          return destination.stream.getAudioTracks().find((track) => track.readyState === "live") || null;
+        } catch (error) {
+          return null;
+        }
+      }
+
+      function disconnectBrowserSpeechRecognitionTrack() {
+        if (browserTranscriptGain && browserTranscriptCompressor) {
+          try {
+            browserTranscriptGain.disconnect(browserTranscriptCompressor);
+          } catch (error) {
+            // Nhánh STT đã được ngắt.
+          }
+        }
+        if (browserTranscriptCompressor && browserTranscriptDestination) {
+          try {
+            browserTranscriptCompressor.disconnect(browserTranscriptDestination);
+          } catch (error) {
+            // Nhánh STT đã được ngắt.
+          }
+        }
+        if (browserTranscriptDestination) stopStreamTracks(browserTranscriptDestination.stream);
+        browserTranscriptGain = null;
+        browserTranscriptCompressor = null;
+        browserTranscriptDestination = null;
+      }
+
       function connectSystemAudioStream(capturedStream) {
         if (!audioContext || !recordingDestination) {
           stopStreamTracks(capturedStream);
@@ -1741,6 +1796,7 @@
 
       function disableSystemAudio(showNotice = true) {
         stopBrowserSpeechRecognition();
+        disconnectBrowserSpeechRecognitionTrack();
         const currentSystemSource = systemSource;
         const currentSystemGain = systemGainNode;
         if (currentSystemGain && recordingDestination) {
@@ -1874,6 +1930,7 @@
         stopMonitoringLoop();
         releaseWakeLock();
         stopSpeechRecognition();
+        disconnectBrowserSpeechRecognitionTrack();
         const currentAudioContext = audioContext;
         const currentDetectionSource = detectionSource;
         const currentMicrophoneSource = microphoneSource;
@@ -2455,5 +2512,5 @@
       updateButtons();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4de537f1fae0500',t:'MTc5MjU2NTQwNg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
